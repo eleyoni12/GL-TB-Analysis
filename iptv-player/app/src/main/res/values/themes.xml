@@ -22,4 +22,9 @@
         <item name="android:statusBarColor">@color/navy_header</item>
         <item name="android:navigationBarColor">@color/navy</item>
     </style>
+    <style name="Theme.IPTV.Splash" parent="Theme.IPTV">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:navigationBarColor">@android:color/white</item>
+    </style>
 </resources>
