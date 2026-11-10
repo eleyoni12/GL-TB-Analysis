@@ -29,4 +29,20 @@
     <string name="kind_series">المسلسلات</string>
     <string name="all_in_section">الكل</string>
     <string name="not_xtream">فتح الحلقات يحتاج اشتراك Xtream</string>
+    <string name="app_subtitle">مشغّل قوائم IPTV · يعمل بالريموت أيضًا</string>
+    <string name="resume_watching">▶ استكمال المشاهدة</string>
+    <string name="nothing_to_resume">لا يوجد ما يمكن استكماله بعد</string>
+    <string name="no_results">لا توجد نتائج</string>
+    <string name="picture">الصورة</string>
+    <string name="picture_title">تحسين الصورة</string>
+    <string name="brightness">السطوع</string>
+    <string name="contrast">التباين</string>
+    <string name="saturation">الألوان</string>
+    <string name="preset_normal">عادي</string>
+    <string name="preset_vivid">حيوي</string>
+    <string name="preset_cinema">سينمائي</string>
+    <string name="preset_bright">ساطع</string>
+    <string name="resize_fit">ملاءمة</string>
+    <string name="resize_fill">تعبئة</string>
+    <string name="resize_zoom">تكبير</string>
 </resources>

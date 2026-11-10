@@ -4,17 +4,22 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 
+/** Shows channels as rows, or as poster cards when [poster] is true. */
 class ChannelAdapter(
     private val isFavorite: (Channel) -> Boolean,
+    private val progressOf: (Channel) -> Int,
     private val onClick: (position: Int) -> Unit,
     private val onLongClick: (position: Int) -> Unit
 ) : ListAdapter<Channel, ChannelAdapter.VH>(Diff) {
+
+    var poster = false
 
     object Diff : DiffUtil.ItemCallback<Channel>() {
         override fun areItemsTheSame(a: Channel, b: Channel) = a.url == b.url && a.name == b.name
@@ -26,6 +31,7 @@ class ChannelAdapter(
         val name: TextView = view.findViewById(R.id.name)
         val group: TextView = view.findViewById(R.id.group)
         val star: TextView = view.findViewById(R.id.star)
+        val progress: ProgressBar = view.findViewById(R.id.watch_progress)
 
         init {
             view.setOnClickListener {
@@ -40,55 +46,37 @@ class ChannelAdapter(
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
-        VH(LayoutInflater.from(parent.context).inflate(R.layout.item_channel, parent, false))
+    override fun getItemViewType(position: Int) = if (poster) 1 else 0
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val layout = if (viewType == 1) R.layout.item_poster else R.layout.item_channel
+        return VH(LayoutInflater.from(parent.context).inflate(layout, parent, false))
+    }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val ch = getItem(position)
         holder.name.text = ch.name
         holder.group.text = ch.group
         holder.star.visibility = if (isFavorite(ch)) View.VISIBLE else View.GONE
-        if (ch.logo.isNullOrBlank()) {
+
+        val pr = progressOf(ch)
+        if (pr in 1..99) {
+            holder.progress.progress = pr
+            holder.progress.visibility = View.VISIBLE
+        } else {
+            holder.progress.visibility = View.GONE
+        }
+
+        val url = ch.logo?.trim()?.let { if (it.startsWith("//")) "http:$it" else it }
+        if (url.isNullOrBlank() || !url.startsWith("http")) {
             holder.logo.setImageResource(R.drawable.ic_tv)
         } else {
-            holder.logo.load(ch.logo) {
+            holder.logo.load(url) {
                 placeholder(R.drawable.ic_tv)
                 error(R.drawable.ic_tv)
+                crossfade(true)
+                addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
             }
         }
-    }
-}
-
-data class GroupItem(val label: String, val count: Int, val key: String)
-
-class GroupAdapter(
-    private val onClick: (GroupItem) -> Unit
-) : ListAdapter<GroupItem, GroupAdapter.VH>(object : DiffUtil.ItemCallback<GroupItem>() {
-    override fun areItemsTheSame(a: GroupItem, b: GroupItem) = a.key == b.key
-    override fun areContentsTheSame(a: GroupItem, b: GroupItem) = a == b
-}) {
-    inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-        val logo: ImageView = view.findViewById(R.id.logo)
-        val name: TextView = view.findViewById(R.id.name)
-        val count: TextView = view.findViewById(R.id.group)
-        val star: TextView = view.findViewById(R.id.star)
-
-        init {
-            view.setOnClickListener {
-                val p = bindingAdapterPosition
-                if (p != RecyclerView.NO_POSITION) onClick(getItem(p))
-            }
-        }
-    }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
-        VH(LayoutInflater.from(parent.context).inflate(R.layout.item_channel, parent, false))
-
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        val g = getItem(position)
-        holder.name.text = g.label
-        holder.count.text = holder.itemView.context.getString(R.string.items_count, g.count)
-        holder.star.visibility = View.GONE
-        holder.logo.setImageResource(R.drawable.ic_tv)
     }
 }

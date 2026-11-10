@@ -18,8 +18,18 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
-        android:background="#66000000"
+        android:background="#880B1426"
         android:padding="10dp"
-        android:textColor="#FFFFFF"
-        android:textSize="18sp" />
+        android:textColor="#D4AF37"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btn_picture"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:text="@string/picture" />
 </FrameLayout>

@@ -1,4 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.IPTV" parent="Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.IPTV" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/gold</item>
+        <item name="colorOnPrimary">@color/navy</item>
+        <item name="colorPrimaryContainer">@color/gold_dark</item>
+        <item name="colorOnPrimaryContainer">@color/text_primary</item>
+        <item name="colorSecondary">@color/gold</item>
+        <item name="colorOnSecondary">@color/navy</item>
+        <item name="colorSecondaryContainer">@color/card_stroke</item>
+        <item name="colorOnSecondaryContainer">@color/gold</item>
+        <item name="android:colorBackground">@color/navy</item>
+        <item name="colorSurface">@color/card</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/card</item>
+        <item name="colorOnSurfaceVariant">@color/text_muted</item>
+        <item name="colorOutline">@color/card_stroke</item>
+        <item name="colorSurfaceContainerHigh">@color/card</item>
+        <item name="colorControlActivated">@color/gold</item>
+        <item name="android:textColorHint">@color/text_muted</item>
+        <item name="android:windowBackground">@color/navy</item>
+        <item name="android:statusBarColor">@color/navy_header</item>
+        <item name="android:navigationBarColor">@color/navy</item>
+    </style>
 </resources>

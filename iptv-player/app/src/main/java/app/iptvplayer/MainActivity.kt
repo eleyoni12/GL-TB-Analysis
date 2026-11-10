@@ -15,10 +15,14 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -30,35 +34,45 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val FAV = "fav"
         const val ALL = "*"
+        const val RESUME = "~resume"
         val KINDS = listOf("live", "vod", "series")
     }
 
     private lateinit var prefs: SharedPreferences
     private lateinit var cacheFile: File
     private lateinit var adapter: ChannelAdapter
-    private lateinit var groupAdapter: GroupAdapter
     private lateinit var recycler: RecyclerView
     private lateinit var searchBox: EditText
     private lateinit var groupTitle: TextView
     private lateinit var progress: ProgressBar
     private lateinit var empty: TextView
+    private lateinit var listEmpty: TextView
     private lateinit var count: TextView
+    private lateinit var sectionChips: ChipGroup
+    private lateinit var groupChips: ChipGroup
+    private lateinit var groupScroll: View
 
     private var all: List<Channel> = emptyList()
     private var byKind: Map<String, List<Channel>> = emptyMap()
+    private var groupsByKind: Map<String, List<String>> = emptyMap()
     private var shown: List<Channel> = emptyList()
     private val favorites = HashSet<String>()
 
-    // Navigation state: home -> section (live/vod/series/fav) -> group -> [episodes]
-    private var rootSection: String? = null   // set when the list has a single kind (skip home)
-    private var section: String? = null       // null = home
-    private var groupName: String? = null     // null = list of groups; ALL = everything in the section
+    private var section = "live"
+    private var group = ALL
     private var episodes: List<Channel>? = null
     private var episodesTitle = ""
     private var query = ""
+    private var lastPoster = false
 
     private val backCallback = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = goBack()
+        override fun handleOnBackPressed() {
+            when {
+                episodes != null -> episodes = null
+                query.isNotBlank() -> { query = ""; searchBox.setText("") }
+            }
+            renderList()
+        }
     }
 
     private val pickFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -69,6 +83,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        History.init(this)
         prefs = getSharedPreferences("iptv", Context.MODE_PRIVATE)
         cacheFile = File(filesDir, "playlist.m3u")
         favorites.addAll(prefs.getStringSet("favs", emptySet()).orEmpty())
@@ -77,29 +92,48 @@ class MainActivity : AppCompatActivity() {
         groupTitle = findViewById(R.id.group_title)
         progress = findViewById(R.id.progress)
         empty = findViewById(R.id.empty)
+        listEmpty = findViewById(R.id.list_empty)
         count = findViewById(R.id.count)
         searchBox = findViewById(R.id.search)
+        sectionChips = findViewById(R.id.chips_sections)
+        groupChips = findViewById(R.id.chips_groups)
+        groupScroll = findViewById(R.id.scroll_groups)
 
         adapter = ChannelAdapter(
             isFavorite = { it.url in favorites },
+            progressOf = { History.progress(it.url) },
             onClick = { onChannelClick(it) },
             onLongClick = { toggleFavorite(it) }
         )
-        groupAdapter = GroupAdapter { onGroupClick(it) }
         recycler = findViewById(R.id.list)
         recycler.layoutManager = LinearLayoutManager(this)
+        recycler.adapter = adapter
 
         searchBox.doAfterTextChanged {
             query = it?.toString().orEmpty()
-            render()
+            renderList()
+        }
+        groupTitle.setOnClickListener {
+            if (episodes != null) {
+                episodes = null
+                renderList()
+            }
         }
         findViewById<Button>(R.id.btn_add).setOnClickListener { showAddDialog() }
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { refresh() }
         empty.setOnClickListener { showAddDialog() }
 
-        render()
+        groupScroll.visibility = View.GONE
         if (cacheFile.exists()) loadCached()
         updateEmpty()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (all.isNotEmpty()) {
+            renderList()
+            adapter.notifyDataSetChanged() // refresh progress bars after watching
+        }
     }
 
     // ---------------------------------------------------------------- loading
@@ -170,19 +204,20 @@ class MainActivity : AppCompatActivity() {
         empty.visibility = if (all.isEmpty() && progress.visibility != View.VISIBLE) View.VISIBLE else View.GONE
     }
 
-    // ------------------------------------------------------------- navigation
+    // ------------------------------------------------------------------ chips
 
     private fun setChannels(list: List<Channel>) {
         all = list
         byKind = list.groupBy { it.kind }
-        val present = KINDS.filter { byKind[it].orEmpty().isNotEmpty() }
-        rootSection = if (present.size == 1) present[0] else null
-        section = rootSection
-        groupName = null
+        groupsByKind = byKind.mapValues { e -> e.value.map { it.group }.distinct().sorted() }
+        section = KINDS.firstOrNull { byKind[it].orEmpty().isNotEmpty() } ?: FAV
+        group = ALL
         episodes = null
         query = ""
         searchBox.setText("")
-        render()
+        rebuildSectionChips()
+        rebuildGroupChips()
+        renderList()
         updateEmpty()
     }
 
@@ -193,90 +228,92 @@ class MainActivity : AppCompatActivity() {
         else -> getString(R.string.favorites)
     }
 
-    private fun canGoBack() =
-        episodes != null || query.isNotBlank() || groupName != null || (section != null && section != rootSection)
+    private fun makeChip(label: String, checked: Boolean, onClick: () -> Unit): Chip =
+        Chip(this).apply {
+            text = label
+            isCheckable = true
+            isCheckedIconVisible = false
+            chipStrokeWidth = 0f
+            chipBackgroundColor = AppCompatResources.getColorStateList(this@MainActivity, R.color.chip_bg)
+            setTextColor(AppCompatResources.getColorStateList(this@MainActivity, R.color.chip_text))
+            isChecked = checked
+            setOnClickListener { onClick() }
+        }
 
-    private fun goBack() {
-        when {
-            episodes != null -> episodes = null
-            query.isNotBlank() -> { query = ""; searchBox.setText(""); }
-            groupName != null -> {
-                groupName = null
-                if (section == FAV) section = rootSection
+    private fun rebuildSectionChips() {
+        sectionChips.removeAllViews()
+        val keys = KINDS.filter { byKind[it].orEmpty().isNotEmpty() } + FAV
+        for (k in keys) {
+            sectionChips.addView(makeChip(kindLabel(k), k == section) {
+                if (section != k) {
+                    section = k
+                    group = ALL
+                    episodes = null
+                    rebuildGroupChips()
+                    renderList()
+                }
+            })
+        }
+    }
+
+    private fun rebuildGroupChips() {
+        groupChips.removeAllViews()
+        if (all.isEmpty() || section == FAV) {
+            groupScroll.visibility = View.GONE
+            return
+        }
+        groupScroll.visibility = View.VISIBLE
+        val keys = listOf(RESUME, ALL) + groupsByKind[section].orEmpty()
+        for (k in keys) {
+            val label = when (k) {
+                RESUME -> getString(R.string.resume_watching)
+                ALL -> getString(R.string.all_in_section)
+                else -> k
             }
-            section != null && section != rootSection -> section = null
+            groupChips.addView(makeChip(label, k == group) {
+                group = k
+                episodes = null
+                renderList()
+            })
         }
-        render()
     }
 
-    private fun homeItems(): List<GroupItem> {
-        val items = KINDS.mapNotNull { k ->
-            val n = byKind[k].orEmpty().size
-            if (n > 0) GroupItem(kindLabel(k), n, "k:$k") else null
-        }
-        val fav = all.count { it.url in favorites }
-        return items + GroupItem(getString(R.string.favorites), fav, "k:$FAV")
-    }
-
-    private fun categoryItems(kind: String): List<GroupItem> {
-        val items = byKind[kind].orEmpty()
-        val counts = items.groupingBy { it.group }.eachCount()
-        return listOf(GroupItem(getString(R.string.all_in_section), items.size, "g:$ALL")) +
-            counts.keys.sorted().map { GroupItem(it, counts[it] ?: 0, "g:$it") }
-    }
-
-    private fun onGroupClick(g: GroupItem) {
-        when {
-            g.key.startsWith("k:") -> {
-                section = g.key.removePrefix("k:")
-                groupName = if (section == FAV) ALL else null
-            }
-            g.key.startsWith("g:") -> groupName = g.key.removePrefix("g:")
-        }
-        render()
-    }
+    // ------------------------------------------------------------------- list
 
     private fun currentItems(): List<Channel> {
         var base = when {
+            group == RESUME -> History.recent(section)
             section == FAV -> all.filter { it.url in favorites }
-            section != null -> byKind[section ?: ""].orEmpty()
-            else -> all
+            group == ALL -> byKind[section].orEmpty()
+            else -> byKind[section].orEmpty().filter { it.group == group }
         }
-        val g = groupName
-        if (g != null && g != ALL && section != FAV) base = base.filter { it.group == g }
-        val q = query.trim().lowercase()
-        if (q.isNotEmpty()) base = base.filter { it.name.lowercase().contains(q) }
+        val q = query.trim()
+        if (q.isNotEmpty()) base = base.filter { it.name.contains(q, ignoreCase = true) }
         return base
     }
 
-    private fun render() {
+    private fun spanCount(): Int {
+        val dm = resources.displayMetrics
+        return (dm.widthPixels / dm.density / 120f).toInt().coerceIn(2, 8)
+    }
+
+    private fun renderList() {
         val eps = episodes
-        when {
-            eps != null -> showChannels(eps, episodesTitle)
-            query.isNotBlank() -> showChannels(currentItems(), "")
-            section == null -> showGroups(homeItems(), "")
-            section != FAV && groupName == null -> showGroups(categoryItems(section!!), kindLabel(section!!))
-            else -> {
-                val title = kindLabel(section!!) + (groupName?.takeIf { it != ALL && section != FAV }?.let { " › $it" } ?: "")
-                showChannels(currentItems(), title)
-            }
+        val items = eps ?: currentItems()
+        val wantPoster = eps == null && (section == "vod" || section == "series")
+        if (wantPoster != lastPoster) {
+            lastPoster = wantPoster
+            adapter.poster = wantPoster
+            recycler.layoutManager = if (wantPoster) GridLayoutManager(this, spanCount()) else LinearLayoutManager(this)
+            recycler.adapter = adapter
         }
-        backCallback.isEnabled = canGoBack()
-    }
-
-    private fun showGroups(items: List<GroupItem>, title: String) {
-        if (recycler.adapter !== groupAdapter) recycler.adapter = groupAdapter
-        groupAdapter.submitList(if (all.isEmpty()) emptyList() else items)
-        groupTitle.text = title
-        count.text = ""
-    }
-
-    private fun showChannels(list: List<Channel>, title: String) {
-        if (recycler.adapter !== adapter) recycler.adapter = adapter
-        shown = list
-        adapter.submitList(list)
-        groupTitle.text = title
-        count.text = getString(R.string.items_count, list.size)
+        shown = items
+        adapter.submitList(items)
+        groupTitle.text = if (eps != null) "→  $episodesTitle" else ""
+        count.text = getString(R.string.items_count, items.size)
+        listEmpty.setText(if (group == RESUME && eps == null) R.string.nothing_to_resume else R.string.no_results)
+        listEmpty.visibility = if (all.isNotEmpty() && items.isEmpty()) View.VISIBLE else View.GONE
+        backCallback.isEnabled = eps != null || query.isNotBlank()
     }
 
     // ---------------------------------------------------------------- actions
@@ -309,7 +346,7 @@ class MainActivity : AppCompatActivity() {
             result.onSuccess {
                 episodes = it
                 episodesTitle = ch.name
-                render()
+                renderList()
             }.onFailure { showError(it) }
         }
     }
@@ -320,7 +357,7 @@ class MainActivity : AppCompatActivity() {
         if (!added) favorites.remove(ch.url)
         prefs.edit().putStringSet("favs", HashSet(favorites)).apply()
         Toast.makeText(this, if (added) R.string.added_fav else R.string.removed_fav, Toast.LENGTH_SHORT).show()
-        if (section == FAV && episodes == null) render() else adapter.notifyItemChanged(position)
+        if (section == FAV && episodes == null) renderList() else adapter.notifyItemChanged(position)
     }
 
     private fun showAddDialog() {
