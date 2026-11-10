@@ -52,6 +52,64 @@ object Playlist {
         }
     }
 
+    /** Like [download], but if an Xtream get.php link fails, falls back to player_api.php. */
+    fun downloadSmart(urlStr: String, dest: File) {
+        try {
+            download(urlStr, dest)
+        } catch (e: IOException) {
+            val u = runCatching { java.net.URI(urlStr) }.getOrNull()
+            val query = u?.rawQuery.orEmpty()
+            val params = query.split('&').mapNotNull {
+                val kv = it.split('=', limit = 2)
+                if (kv.size == 2) kv[0] to java.net.URLDecoder.decode(kv[1], "UTF-8") else null
+            }.toMap()
+            val user = params["username"]
+            val pass = params["password"]
+            if (u == null || user.isNullOrBlank() || pass.isNullOrBlank() || !urlStr.contains("get.php")) throw e
+            val base = "${u.scheme}://${u.rawAuthority}" + u.rawPath.substringBeforeLast("/get.php").trimEnd('/')
+            try {
+                xtreamViaApi(base, user, pass, dest)
+            } catch (e2: Exception) {
+                throw IOException("get.php: ${e.message} | player_api: ${e2.message}")
+            }
+        }
+    }
+
+    private fun xtreamViaApi(base: String, user: String, pass: String, dest: File) {
+        val enc = { v: String -> java.net.URLEncoder.encode(v, "UTF-8") }
+        val api = "$base/player_api.php?username=${enc(user)}&password=${enc(pass)}"
+        val tmp = File(dest.path + ".json")
+        try {
+            download("$api&action=get_live_categories", tmp)
+            val cats = HashMap<String, String>()
+            val catArr = org.json.JSONArray(tmp.readText())
+            for (i in 0 until catArr.length()) {
+                val o = catArr.getJSONObject(i)
+                cats[o.optString("category_id")] = o.optString("category_name")
+            }
+            download("$api&action=get_live_streams", tmp)
+            val arr = org.json.JSONArray(tmp.readText())
+            val out = File(dest.path + ".gen")
+            out.bufferedWriter().use { w ->
+                w.write("#EXTM3U\n")
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val id = o.optString("stream_id")
+                    if (id.isEmpty()) continue
+                    val name = o.optString("name").replace(Regex("[\\r\\n]"), " ")
+                    val logo = o.optString("stream_icon").replace("\"", "")
+                    val group = (cats[o.optString("category_id")] ?: "").replace("\"", "")
+                    w.write("#EXTINF:-1 tvg-logo=\"$logo\" group-title=\"$group\",$name\n")
+                    w.write("$base/live/${enc(user)}/${enc(pass)}/$id.ts\n")
+                }
+            }
+            dest.delete()
+            if (!out.renameTo(dest)) throw IOException("Cannot save playlist")
+        } finally {
+            tmp.delete()
+        }
+    }
+
     fun parse(file: File): List<Channel> {
         val out = ArrayList<Channel>()
         var name: String? = null
@@ -106,8 +164,11 @@ object Playlist {
     }
 
     fun xtreamUrl(server: String, user: String, pass: String): String {
-        var s = server.trim().trimEnd('/')
+        var s = server.trim().substringBefore('?')
         if (!s.contains("://")) s = "http://$s"
+        s = s.trimEnd('/')
+        // Drop panel paths users often paste (…/c, …/get.php, …/player_api.php, …/portal.php)
+        s = s.replace(Regex("/(c|get\\.php|player_api\\.php|panel_api\\.php|portal\\.php|stalker_portal/c)$"), "").trimEnd('/')
         return "$s/get.php?username=${java.net.URLEncoder.encode(user.trim(), "UTF-8")}" +
             "&password=${java.net.URLEncoder.encode(pass.trim(), "UTF-8")}&type=m3u_plus&output=ts"
     }

@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
             setLoading(true)
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    Playlist.download(url, cacheFile)
+                    Playlist.downloadSmart(url, cacheFile)
                     Playlist.parse(cacheFile)
                 }
             }
