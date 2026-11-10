@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aey</string>
+    <string name="app_name">Aey Xtream IPTV</string>
+    <string name="header_title">Aey</string>
     <string name="search_hint">ابحث عن قناة…</string>
     <string name="add_playlist">إضافة قائمة</string>
     <string name="refresh">تحديث</string>
