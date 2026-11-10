@@ -123,7 +123,8 @@ class PlayerActivity : AppCompatActivity() {
         // Resume movies/episodes where they were left.
         val saved = if (first.kind != "live") History.posOf(first.url) else 0L
         val prog = History.progress(first.url)
-        val startPos = if (saved > 10_000 && prog in 0..94) saved - 3_000 else 0L
+        val restart = intent.getBooleanExtra("restart", false)
+        val startPos = if (!restart && saved > 10_000 && prog in 0..94) saved - 3_000 else 0L
         History.touch(first)
 
         val http = DefaultHttpDataSource.Factory()

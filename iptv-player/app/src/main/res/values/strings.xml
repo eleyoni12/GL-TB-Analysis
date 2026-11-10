@@ -62,4 +62,19 @@
     <string name="epg_next">التالي: %1$s</string>
     <string name="load_failed_title">تعذر تحميل القائمة</string>
     <string name="loaded_summary">تم التحميل: %1$d قناة · %2$d فيلم · %3$d مسلسل</string>
+    <string name="play">▶ تشغيل</string>
+    <string name="resume">▶ استكمال</string>
+    <string name="restart">⟲ من البداية</string>
+    <string name="trailer">🎬 الإعلان</string>
+    <string name="plot_label">القصة</string>
+    <string name="cast_label">الممثلون</string>
+    <string name="director_label">المخرج</string>
+    <string name="genre_label">النوع</string>
+    <string name="season_label">الموسم %1$d</string>
+    <string name="no_details">لا توجد تفاصيل إضافية من السيرفر</string>
+    <string name="no_trailer_app">لا يوجد تطبيق لفتح الإعلان</string>
+    <string name="cat_sort">ترتيب التصنيفات (أفلام ومسلسلات)</string>
+    <string name="sort_newest">الأحدث أولًا</string>
+    <string name="sort_server">ترتيب السيرفر</string>
+    <string name="sort_az">أبجدي</string>
 </resources>

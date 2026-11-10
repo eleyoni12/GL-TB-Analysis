@@ -29,7 +29,8 @@ object History {
                     Entry(
                         Channel(
                             o.getString("n"), o.getString("u"), o.optString("g"),
-                            o.optString("l").ifBlank { null }, o.optString("k", "live")
+                            o.optString("l").ifBlank { null }, o.optString("k", "live"),
+                            o.optString("r").ifBlank { null }
                         ),
                         o.optLong("p"), o.optLong("d"), o.optLong("t")
                     )
@@ -46,7 +47,7 @@ object History {
             a.put(
                 JSONObject()
                     .put("n", e.ch.name).put("u", e.ch.url).put("g", e.ch.group)
-                    .put("l", e.ch.logo ?: "").put("k", e.ch.kind)
+                    .put("l", e.ch.logo ?: "").put("k", e.ch.kind).put("r", e.ch.rating ?: "")
                     .put("p", e.pos).put("d", e.dur).put("t", e.ts)
             )
         }

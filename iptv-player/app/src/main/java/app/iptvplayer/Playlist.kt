@@ -16,12 +16,42 @@ data class Channel(
     val url: String,
     val group: String,
     val logo: String?,
-    val kind: String = "live"
+    val kind: String = "live",
+    val rating: String? = null
+)
+
+/** The parsed playlist, indexed once so switching sections/categories is instant. */
+class Library(
+    val all: List<Channel>,
+    val byKind: Map<String, List<Channel>>,
+    val groupsByKind: Map<String, List<String>>, // categories in the order the server gave them
+    val byGroup: Map<String, List<Channel>>
+) {
+    companion object {
+        fun key(kind: String, group: String) = "$kind\u0000$group"
+    }
+}
+
+/** Movie / series details shown before playing. */
+class Details(
+    val title: String,
+    val poster: String?,
+    val backdrop: String?,
+    val plot: String,
+    val cast: String,
+    val director: String,
+    val genre: String,
+    val release: String,
+    val rating: String,
+    val duration: String,
+    val trailer: String,
+    val episodes: List<Channel>
 )
 
 /** Holds the channel list currently playing, so the player can zap next/previous. */
 object Session {
     var channels: List<Channel> = emptyList()
+    var selected: Channel? = null
 }
 
 object Playlist {
@@ -140,8 +170,15 @@ object Playlist {
 
     private fun clean(s: String) = s.replace("\"", "").replace(Regex("[\\r\\n]"), " ")
 
-    private fun emit(w: Writer, kind: String, name: String, logo: String, group: String, url: String) {
-        w.write("#EXTINF:-1 x-kind=\"$kind\" tvg-logo=\"${clean(logo)}\" group-title=\"${clean(group)}\",${clean(name)}\n")
+    private fun ratingOf(m: Map<String, String>): String? {
+        val r = m["rating"]?.toDoubleOrNull()?.takeIf { it > 0 }
+            ?: m["rating_5based"]?.toDoubleOrNull()?.takeIf { it > 0 }?.times(2)
+        return r?.let { String.format(java.util.Locale.US, "%.1f", it.coerceAtMost(10.0)) }
+    }
+
+    private fun emit(w: Writer, kind: String, name: String, logo: String, group: String, url: String, rating: String? = null) {
+        val rt = if (rating != null) " x-rating=\"$rating\"" else ""
+        w.write("#EXTINF:-1 x-kind=\"$kind\"$rt tvg-logo=\"${clean(logo)}\" group-title=\"${clean(group)}\",${clean(name)}\n")
         w.write(url + "\n")
     }
 
@@ -188,13 +225,15 @@ object Playlist {
                     logoKey: String
                 ) {
                     try {
-                        val cats = HashMap<String, String>()
+                        val cats = LinkedHashMap<String, String>() // keeps the server's category order
                         download("$api&action=$catAction", tmp)
                         forEachObject(tmp) { cats[it["category_id"].orEmpty()] = it["category_name"].orEmpty() }
+                        for (name in cats.values) w.write("#AEYCAT:$kind:${clean(name)}\n")
                         download("$api&action=$listAction", tmp)
                         forEachObject(tmp) { m ->
                             val sid = id(m) ?: return@forEachObject
-                            emit(w, kind, m["name"].orEmpty(), m[logoKey].orEmpty(), cats[m["category_id"].orEmpty()].orEmpty(), url(m, sid))
+                            val rt = if (kind == "live") null else ratingOf(m)
+                            emit(w, kind, m["name"].orEmpty(), m[logoKey].orEmpty(), cats[m["category_id"].orEmpty()].orEmpty(), url(m, sid), rt)
                             total++
                         }
                     } catch (e: Exception) {
@@ -221,30 +260,82 @@ object Playlist {
         }
     }
 
-    /** Fetches the episodes of one Xtream series. */
-    fun fetchEpisodes(srcUrl: String, seriesId: String, seriesName: String, logo: String?, workDir: File): List<Channel> {
+    private fun firstText(o: JSONObject?, vararg keys: String): String {
+        if (o == null) return ""
+        for (k in keys) {
+            val v = o.opt(k)
+            if (v is String && v.isNotBlank()) return v.trim()
+            if (v is Number) return v.toString()
+        }
+        return ""
+    }
+
+    private fun firstBackdrop(o: JSONObject?): String? {
+        val b = o?.opt("backdrop_path")
+        if (b is JSONArray && b.length() > 0) return b.optString(0).takeIf { it.isNotBlank() }
+        if (b is String && b.isNotBlank()) return b
+        return null
+    }
+
+    /** Synopsis, cast, trailer (and the episodes for a series) from the Xtream API. */
+    fun fetchDetails(srcUrl: String, ch: Channel, workDir: File): Details {
         val (base, user, pass) = xtreamCreds(srcUrl) ?: throw IOException("Not an Xtream source")
         val enc = { v: String -> java.net.URLEncoder.encode(v, "UTF-8") }
-        val tmp = File(workDir, "series_info.json")
+        val api = "$base/player_api.php?username=${enc(user)}&password=${enc(pass)}"
+        val tmp = File(workDir, "details.json")
         try {
-            download("$base/player_api.php?username=${enc(user)}&password=${enc(pass)}&action=get_series_info&series_id=${enc(seriesId)}", tmp)
-            val root = JSONObject(tmp.readText())
-            val found = ArrayList<JSONObject>()
-            collectEpisodes(root.opt("episodes"), found)
-            val eps = found.sortedWith(compareBy({ it.optInt("season") }, { it.optInt("episode_num") }))
-            return eps.map { e ->
-                val id = e.optString("id")
-                val ext = e.optString("container_extension").ifBlank { "mp4" }
-                val title = e.optString("title").ifBlank { "Episode ${e.optInt("episode_num")}" }
-                val img = e.optJSONObject("info")?.optString("movie_image")?.takeIf { it.isNotBlank() } ?: logo
-                Channel(
-                    name = "S${e.optInt("season")}E${e.optInt("episode_num")}  $title",
-                    url = "$base/series/${enc(user)}/${enc(pass)}/$id.$ext",
-                    group = seriesName,
-                    logo = img,
-                    kind = "series"
+            if (ch.url.startsWith(SERIES_SCHEME)) {
+                val id = ch.url.removePrefix(SERIES_SCHEME)
+                download("$api&action=get_series_info&series_id=${enc(id)}", tmp)
+                val root = JSONObject(tmp.readText())
+                val info = root.optJSONObject("info")
+                val found = ArrayList<JSONObject>()
+                collectEpisodes(root.opt("episodes"), found)
+                val eps = found.sortedWith(compareBy({ it.optInt("season") }, { it.optInt("episode_num") })).map { e ->
+                    val eid = e.optString("id")
+                    val ext = e.optString("container_extension").ifBlank { "mp4" }
+                    val title = e.optString("title").ifBlank { "Episode ${e.optInt("episode_num")}" }
+                    Channel(
+                        name = "S${e.optInt("season")}E${e.optInt("episode_num")}  $title",
+                        url = "$base/series/${enc(user)}/${enc(pass)}/$eid.$ext",
+                        group = ch.name,
+                        logo = e.optJSONObject("info")?.optString("movie_image")?.takeIf { it.isNotBlank() } ?: ch.logo,
+                        kind = "series"
+                    )
+                }
+                return Details(
+                    title = firstText(info, "name").ifBlank { ch.name },
+                    poster = firstText(info, "cover").ifBlank { ch.logo ?: "" }.ifBlank { null },
+                    backdrop = firstBackdrop(info),
+                    plot = firstText(info, "plot", "description"),
+                    cast = firstText(info, "cast"),
+                    director = firstText(info, "director"),
+                    genre = firstText(info, "genre"),
+                    release = firstText(info, "releaseDate", "release_date", "releasedate"),
+                    rating = firstText(info, "rating").ifBlank { ch.rating ?: "" },
+                    duration = firstText(info, "episode_run_time"),
+                    trailer = firstText(info, "youtube_trailer"),
+                    episodes = eps
                 )
             }
+            val vid = Regex("/movie/[^/]+/[^/]+/(\\d+)\\.").find(ch.url)?.groupValues?.get(1)
+                ?: throw IOException("Not a movie link")
+            download("$api&action=get_vod_info&vod_id=${enc(vid)}", tmp)
+            val info = JSONObject(tmp.readText()).optJSONObject("info")
+            return Details(
+                title = firstText(info, "name", "o_name").ifBlank { ch.name },
+                poster = firstText(info, "movie_image", "cover_big").ifBlank { ch.logo ?: "" }.ifBlank { null },
+                backdrop = firstBackdrop(info),
+                plot = firstText(info, "plot", "description"),
+                cast = firstText(info, "cast", "actors"),
+                director = firstText(info, "director"),
+                genre = firstText(info, "genre"),
+                release = firstText(info, "releasedate", "release_date", "releaseDate"),
+                rating = firstText(info, "rating").ifBlank { ch.rating ?: "" },
+                duration = firstText(info, "duration"),
+                trailer = firstText(info, "youtube_trailer"),
+                episodes = emptyList()
+            )
         } finally {
             tmp.delete()
         }
@@ -260,16 +351,18 @@ object Playlist {
 
     // --------------------------------------------------------------- parsing
 
-    fun parse(file: File): List<Channel> {
+    fun parse(file: File): Library {
         val out = ArrayList<Channel>()
+        val catOrder = HashMap<String, LinkedHashSet<String>>()
         var name: String? = null
         var group = ""
         var logo: String? = null
         var kind: String? = null
+        var rating: String? = null
 
         file.bufferedReader().useLines { lines ->
             for (raw in lines) {
-                val line = raw.removePrefix("﻿").trim()
+                val line = raw.removePrefix("\uFEFF").trim()
                 if (line.isEmpty()) continue
                 when {
                     line.startsWith("#EXTINF", ignoreCase = true) -> {
@@ -281,6 +374,13 @@ object Playlist {
                         group = map["group-title"].orEmpty()
                         logo = map["tvg-logo"]?.takeIf { it.isNotBlank() }
                         kind = map["x-kind"]
+                        rating = map["x-rating"]?.takeIf { it.isNotBlank() }
+                    }
+                    line.startsWith("#AEYCAT:") -> {
+                        val rest = line.removePrefix("#AEYCAT:")
+                        val k = rest.substringBefore(':')
+                        val n = rest.substringAfter(':').ifBlank { "Other" }
+                        catOrder.getOrPut(k) { LinkedHashSet() }.add(n)
                     }
                     line.startsWith("#EXTGRP:", ignoreCase = true) -> {
                         if (group.isBlank()) group = line.substringAfter(':').trim()
@@ -299,16 +399,27 @@ object Playlist {
                                     url = line,
                                     group = group.ifBlank { "Other" },
                                     logo = logo,
-                                    kind = k
+                                    kind = k,
+                                    rating = rating
                                 )
                             )
                         }
-                        name = null; group = ""; logo = null; kind = null
+                        name = null; group = ""; logo = null; kind = null; rating = null
                     }
                 }
             }
         }
-        return out
+
+        val byKind = out.groupBy { it.kind }
+        val byGroup = out.groupBy { Library.key(it.kind, it.group) }
+        val groupsByKind = byKind.mapValues { (k, list) ->
+            val present = LinkedHashSet<String>()
+            for (c in list) present.add(c.group)
+            val declared = catOrder[k].orEmpty().filter { it in present }
+            val ds = declared.toHashSet()
+            declared + present.filter { it !in ds } // server order first, then first-appearance order
+        }
+        return Library(out, byKind, groupsByKind, byGroup)
     }
 
     private fun firstCommaOutsideQuotes(s: String): Int {

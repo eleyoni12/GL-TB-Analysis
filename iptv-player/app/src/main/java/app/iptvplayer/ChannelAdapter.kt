@@ -7,25 +7,27 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.google.android.material.card.MaterialCardView
 
-/** Shows channels as rows, or as poster cards when [poster] is true. */
+/**
+ * Shows channels as rows, or as poster cards when [poster] is true.
+ * A plain adapter (no DiffUtil): switching between big lists is much faster this way.
+ */
 class ChannelAdapter(
     private val isFavorite: (Channel) -> Boolean,
     private val progressOf: (Channel) -> Int,
     private val onClick: (position: Int) -> Unit,
     private val onLongClick: (position: Int) -> Unit
-) : ListAdapter<Channel, ChannelAdapter.VH>(Diff) {
+) : RecyclerView.Adapter<ChannelAdapter.VH>() {
 
     var poster = false
+    private var items: List<Channel> = emptyList()
 
-    object Diff : DiffUtil.ItemCallback<Channel>() {
-        override fun areItemsTheSame(a: Channel, b: Channel) = a.url == b.url && a.name == b.name
-        override fun areContentsTheSame(a: Channel, b: Channel) = a == b
+    fun setItems(list: List<Channel>) {
+        items = list
+        notifyDataSetChanged()
     }
 
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -34,6 +36,7 @@ class ChannelAdapter(
         val group: TextView = view.findViewById(R.id.group)
         val star: TextView = view.findViewById(R.id.star)
         val progress: ProgressBar = view.findViewById(R.id.watch_progress)
+        val rating: TextView? = view.findViewById(R.id.rating)
         var boundUrl: String? = null
 
         init {
@@ -49,6 +52,10 @@ class ChannelAdapter(
             group.setTextColor(AppTheme.muted)
             star.setTextColor(AppTheme.accent)
             progress.progressTintList = ColorStateList.valueOf(AppTheme.accent)
+            rating?.apply {
+                background = AppTheme.rounded(0xCC000000.toInt(), 10 * d)
+                setTextColor(0xFFFFD54F.toInt())
+            }
 
             // Clear "where am I" feedback for remote-control navigation.
             view.setOnFocusChangeListener { v, has ->
@@ -67,6 +74,8 @@ class ChannelAdapter(
         }
     }
 
+    override fun getItemCount() = items.size
+
     override fun getItemViewType(position: Int) = if (poster) 1 else 0
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -75,11 +84,20 @@ class ChannelAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val ch = getItem(position)
+        val ch = items[position]
         holder.boundUrl = ch.url
         holder.name.text = ch.name
         holder.group.text = ch.group
         holder.star.visibility = if (isFavorite(ch)) View.VISIBLE else View.GONE
+
+        holder.rating?.let { r ->
+            if (!ch.rating.isNullOrBlank()) {
+                r.text = "★ " + ch.rating
+                r.visibility = View.VISIBLE
+            } else {
+                r.visibility = View.GONE
+            }
+        }
 
         // Program guide (now playing) for live channels, when the provider has it.
         if (!poster && ch.kind == "live") {

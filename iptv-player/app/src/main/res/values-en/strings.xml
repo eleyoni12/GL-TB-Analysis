@@ -62,4 +62,19 @@
     <string name="epg_next">Next: %1$s</string>
     <string name="load_failed_title">Could not load the list</string>
     <string name="loaded_summary">Loaded: %1$d channels · %2$d movies · %3$d series</string>
+    <string name="play">▶ Play</string>
+    <string name="resume">▶ Resume</string>
+    <string name="restart">⟲ From start</string>
+    <string name="trailer">🎬 Trailer</string>
+    <string name="plot_label">Story</string>
+    <string name="cast_label">Cast</string>
+    <string name="director_label">Director</string>
+    <string name="genre_label">Genre</string>
+    <string name="season_label">Season %1$d</string>
+    <string name="no_details">No extra details from the server</string>
+    <string name="no_trailer_app">No app available to open the trailer</string>
+    <string name="cat_sort">Category order (movies &amp; series)</string>
+    <string name="sort_newest">Newest first</string>
+    <string name="sort_server">Server order</string>
+    <string name="sort_az">A–Z</string>
 </resources>

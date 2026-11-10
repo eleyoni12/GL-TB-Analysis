@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -38,6 +39,7 @@ class MainActivity : AppCompatActivity() {
         const val ALL = "*"
         const val RESUME = "~resume"
         val KINDS = listOf("live", "vod", "series")
+        val YEAR = Regex("(?:19|20)\\d{2}")
     }
 
     private lateinit var prefs: SharedPreferences
@@ -54,22 +56,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var empty: TextView
     private lateinit var listEmpty: TextView
     private lateinit var count: TextView
+    private lateinit var topBlock: View
 
-    private var all: List<Channel> = emptyList()
-    private var byKind: Map<String, List<Channel>> = emptyMap()
-    private var groupsByKind: Map<String, List<String>> = emptyMap()
+    private var lib: Library = Library(emptyList(), emptyMap(), emptyMap(), emptyMap())
     private var shown: List<Channel> = emptyList()
     private val favorites = HashSet<String>()
 
     private var section = "live"
     private var group = ALL
-    private var episodes: List<Channel>? = null
-    private var episodesTitle = ""
     private var query = ""
     private var lastPoster = false
     private var returnedFromPlayer = false
     private var topHidden = false
-    private lateinit var topBlock: View
+    private var searchJob: Job? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val searchRunnable = Runnable { renderList() }
@@ -83,7 +82,6 @@ class MainActivity : AppCompatActivity() {
                     sectionsRv.post { sectionsRv.getChildAt(0)?.requestFocus() }
                     return
                 }
-                episodes != null -> episodes = null
                 query.isNotBlank() -> { query = ""; searchBox.setText("") }
             }
             renderList()
@@ -152,12 +150,6 @@ class MainActivity : AppCompatActivity() {
             handler.removeCallbacks(searchRunnable)
             handler.postDelayed(searchRunnable, 250) // don't filter on every keystroke
         }
-        groupTitle.setOnClickListener {
-            if (episodes != null) {
-                episodes = null
-                renderList()
-            }
-        }
         findViewById<Button>(R.id.btn_add).setOnClickListener { showAddDialog() }
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { refresh() }
         findViewById<Button>(R.id.btn_settings).setOnClickListener { SettingsDialog.show(this) { recreate() } }
@@ -169,10 +161,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (returnedFromPlayer && all.isNotEmpty()) {
+        if (returnedFromPlayer && lib.all.isNotEmpty()) {
             returnedFromPlayer = false
-            renderList()
-            adapter.notifyDataSetChanged() // refresh progress bars after watching
+            // Keep the scroll position; only refresh progress bars (and the resume list itself).
+            if (group == RESUME) renderList() else adapter.notifyDataSetChanged()
         }
     }
 
@@ -206,7 +198,7 @@ class MainActivity : AppCompatActivity() {
         if (visible == !topHidden) return
         topHidden = !visible
         topBlock.visibility = if (visible) View.VISIBLE else View.GONE
-        backCallback.isEnabled = episodes != null || query.isNotBlank() || topHidden
+        backCallback.isEnabled = query.isNotBlank() || topHidden
     }
 
     // ---------------------------------------------------------------- loading
@@ -216,7 +208,7 @@ class MainActivity : AppCompatActivity() {
             setLoading(true)
             val result = runCatching { withContext(Dispatchers.IO) { Playlist.parse(cacheFile) } }
             setLoading(false)
-            result.onSuccess { setChannels(it) }
+            result.onSuccess { setLibrary(it) }
         }
     }
 
@@ -238,15 +230,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             setLoading(false)
-            result.onSuccess { (used, list) ->
+            result.onSuccess { (used, library) ->
                 prefs.edit().putString("source_url", used).apply()
                 Epg.source = used
-                setChannels(list)
+                setLibrary(library)
                 Toast.makeText(
                     this@MainActivity,
                     getString(
                         R.string.loaded_summary,
-                        list.count { it.kind == "live" }, list.count { it.kind == "vod" }, list.count { it.kind == "series" }
+                        library.byKind["live"].orEmpty().size,
+                        library.byKind["vod"].orEmpty().size,
+                        library.byKind["series"].orEmpty().size
                     ),
                     Toast.LENGTH_LONG
                 ).show()
@@ -269,7 +263,7 @@ class MainActivity : AppCompatActivity() {
             result.onSuccess {
                 prefs.edit().remove("source_url").apply()
                 Epg.source = null
-                setChannels(it)
+                setLibrary(it)
             }.onFailure { showError(it) }
         }
     }
@@ -288,22 +282,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateEmpty() {
-        empty.visibility = if (all.isEmpty() && progress.visibility != View.VISIBLE) View.VISIBLE else View.GONE
+        empty.visibility = if (lib.all.isEmpty() && progress.visibility != View.VISIBLE) View.VISIBLE else View.GONE
     }
 
     // ------------------------------------------------------------------ chips
 
-    private fun setChannels(list: List<Channel>) {
-        all = list
-        byKind = list.groupBy { it.kind }
-        groupsByKind = byKind.mapValues { e -> e.value.map { it.group }.distinct().sorted() }
-        section = KINDS.firstOrNull { byKind[it].orEmpty().isNotEmpty() } ?: FAV
+    private fun setLibrary(l: Library) {
+        lib = l
+        section = KINDS.firstOrNull { lib.byKind[it].orEmpty().isNotEmpty() } ?: FAV
         group = ALL
-        episodes = null
         query = ""
         searchBox.setText("")
         sectionAdapter.submit(
-            (KINDS.filter { byKind[it].orEmpty().isNotEmpty() } + FAV).map { ChipAdapter.Item(it, kindLabel(it)) },
+            (KINDS.filter { lib.byKind[it].orEmpty().isNotEmpty() } + FAV).map { ChipAdapter.Item(it, kindLabel(it)) },
             section
         )
         rebuildGroupChips()
@@ -330,7 +321,6 @@ class MainActivity : AppCompatActivity() {
         if (k == section) return
         section = k
         group = ALL
-        episodes = null
         sectionAdapter.select(k)
         rebuildGroupChips()
         renderList()
@@ -338,18 +328,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun onGroupClick(k: String) {
         group = k
-        episodes = null
         groupAdapter.select(k)
         renderList()
     }
 
+    private fun yearOf(name: String): Int = YEAR.findAll(name).maxOfOrNull { it.value.toInt() } ?: -1
+
+    /** Live keeps the server order; movies/series follow the user's choice (default: newest year first). */
+    private fun orderedGroups(kind: String): List<String> {
+        val raw = lib.groupsByKind[kind].orEmpty()
+        if (kind == "live") return raw
+        return when (prefs.getInt("cat_sort", 0)) {
+            1 -> raw
+            2 -> raw.sortedBy { it.lowercase() }
+            else -> raw.sortedByDescending { yearOf(it) } // stable: same year keeps the server order
+        }
+    }
+
     private fun rebuildGroupChips() {
-        if (all.isEmpty() || section == FAV) {
+        if (lib.all.isEmpty() || section == FAV) {
             groupsRv.visibility = View.GONE
             return
         }
         groupsRv.visibility = View.VISIBLE
-        val keys = listOf(RESUME, ALL) + groupsByKind[section].orEmpty()
+        val keys = listOf(RESUME, ALL) + orderedGroups(section)
         groupAdapter.submit(
             keys.map {
                 ChipAdapter.Item(
@@ -368,16 +370,12 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------- list
 
-    private fun currentItems(): List<Channel> {
-        var base = when {
-            group == RESUME -> History.recent(section)
-            section == FAV -> all.filter { it.url in favorites }
-            group == ALL -> byKind[section].orEmpty()
-            else -> byKind[section].orEmpty().filter { it.group == group }
-        }
-        val q = query.trim()
-        if (q.isNotEmpty()) base = base.filter { it.name.contains(q, ignoreCase = true) }
-        return base
+    /** The list for the current section/category, before any search. Cheap: lookups, no filtering. */
+    private fun baseItems(): List<Channel> = when {
+        group == RESUME -> History.recent(section)
+        section == FAV -> lib.all.filter { it.url in favorites }
+        group == ALL -> lib.byKind[section].orEmpty()
+        else -> lib.byGroup[Library.key(section, group)].orEmpty()
     }
 
     private fun spanCount(): Int {
@@ -386,9 +384,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderList() {
-        val eps = episodes
-        val items = eps ?: currentItems()
-        val wantPoster = eps == null && (section == "vod" || section == "series")
+        searchJob?.cancel()
+        val base = baseItems()
+        val q = query.trim()
+        if (q.isEmpty()) {
+            show(base)
+        } else {
+            // Search runs off the main thread so typing/navigation never freezes.
+            searchJob = lifecycleScope.launch {
+                val result = withContext(Dispatchers.Default) { base.filter { it.name.contains(q, ignoreCase = true) } }
+                if (q == query.trim()) show(result)
+            }
+        }
+        backCallback.isEnabled = query.isNotBlank() || topHidden
+    }
+
+    private fun show(items: List<Channel>) {
+        val wantPoster = section == "vod" || section == "series"
         if (wantPoster != lastPoster) {
             lastPoster = wantPoster
             adapter.poster = wantPoster
@@ -396,48 +408,35 @@ class MainActivity : AppCompatActivity() {
             recycler.adapter = adapter
         }
         shown = items
-        adapter.submitList(items)
-        groupTitle.text = if (eps != null) "→  $episodesTitle" else ""
+        adapter.setItems(items)
+        recycler.scrollToPosition(0)
+        groupTitle.text = ""
         count.text = getString(R.string.items_count, items.size)
-        listEmpty.setText(if (group == RESUME && eps == null) R.string.nothing_to_resume else R.string.no_results)
-        listEmpty.visibility = if (all.isNotEmpty() && items.isEmpty()) View.VISIBLE else View.GONE
-        backCallback.isEnabled = eps != null || query.isNotBlank() || topHidden
+        listEmpty.setText(if (group == RESUME && query.isBlank()) R.string.nothing_to_resume else R.string.no_results)
+        listEmpty.visibility = if (lib.all.isNotEmpty() && items.isEmpty()) View.VISIBLE else View.GONE
     }
 
     // ---------------------------------------------------------------- actions
 
+    private fun hasXtream(): Boolean =
+        Playlist.xtreamCreds(prefs.getString("source_url", null).orEmpty()) != null
+
     private fun onChannelClick(position: Int) {
         val ch = shown.getOrNull(position) ?: return
-        if (ch.url.startsWith(Playlist.SERIES_SCHEME)) {
-            openSeries(ch)
+        returnedFromPlayer = true
+
+        // Movies and series open a details page (story, cast, trailer) before playing.
+        val viaDetails = group != RESUME && hasXtream() &&
+            (ch.url.startsWith(Playlist.SERIES_SCHEME) || ch.kind == "vod")
+        if (viaDetails) {
+            Session.selected = ch
+            startActivity(Intent(this, DetailsActivity::class.java))
             return
         }
+
         val playable = shown.filter { !it.url.startsWith(Playlist.SERIES_SCHEME) }
         Session.channels = playable
-        returnedFromPlayer = true
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("index", playable.indexOf(ch).coerceAtLeast(0)))
-    }
-
-    private fun openSeries(ch: Channel) {
-        val src = prefs.getString("source_url", null)
-        if (src == null || Playlist.xtreamCreds(src) == null) {
-            Toast.makeText(this, R.string.not_xtream, Toast.LENGTH_LONG).show()
-            return
-        }
-        lifecycleScope.launch {
-            setLoading(true)
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    Playlist.fetchEpisodes(src, ch.url.removePrefix(Playlist.SERIES_SCHEME), ch.name, ch.logo, cacheDir)
-                }
-            }
-            setLoading(false)
-            result.onSuccess {
-                episodes = it
-                episodesTitle = ch.name
-                renderList()
-            }.onFailure { showError(it) }
-        }
     }
 
     private fun toggleFavorite(position: Int) {
@@ -446,7 +445,7 @@ class MainActivity : AppCompatActivity() {
         if (!added) favorites.remove(ch.url)
         prefs.edit().putStringSet("favs", HashSet(favorites)).apply()
         Toast.makeText(this, if (added) R.string.added_fav else R.string.removed_fav, Toast.LENGTH_SHORT).show()
-        if (section == FAV && episodes == null) renderList() else adapter.notifyItemChanged(position)
+        if (section == FAV) renderList() else adapter.notifyItemChanged(position)
     }
 
     private fun showAddDialog() {

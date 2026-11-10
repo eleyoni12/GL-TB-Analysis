@@ -103,6 +103,29 @@ object SettingsDialog {
         colorRow("accent", R.string.c_accent, { accent }, { accent = it })
         paintSwatches()
 
+        // Category order for movies & series
+        val sortPrefs = act.getSharedPreferences("iptv", android.content.Context.MODE_PRIVATE)
+        root.addView(TextView(act).apply { setText(R.string.cat_sort); setPadding(0, dp(12), 0, 0) })
+        val sortRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        val sortButtons = ArrayList<Button>()
+        val sortLabels = listOf(R.string.sort_newest, R.string.sort_server, R.string.sort_az)
+        fun paintSort() {
+            val cur = sortPrefs.getInt("cat_sort", 0)
+            sortButtons.forEachIndexed { i, b -> b.alpha = if (i == cur) 1f else 0.5f }
+        }
+        sortLabels.forEachIndexed { i, res ->
+            sortRow.addView(Button(act).apply {
+                setText(res)
+                isAllCaps = false
+                setOnClickListener {
+                    sortPrefs.edit().putInt("cat_sort", i).apply()
+                    paintSort()
+                }
+            }.also { sortButtons.add(it) })
+        }
+        paintSort()
+        root.addView(HorizontalScrollView(act).apply { addView(sortRow) })
+
         // Language
         root.addView(TextView(act).apply { setText(R.string.language); setPadding(0, dp(12), 0, 0) })
         val langRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }

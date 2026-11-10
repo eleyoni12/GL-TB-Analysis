@@ -43,6 +43,10 @@
             android:windowSoftInputMode="adjustPan" />
 
         <activity
+            android:name=".DetailsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".PlayerActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation"
             android:exported="false"
