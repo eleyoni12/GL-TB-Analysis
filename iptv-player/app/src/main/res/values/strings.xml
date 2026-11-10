@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IPTV Player</string>
+    <string name="search_hint">ابحث عن قناة…</string>
+    <string name="add_playlist">إضافة قائمة</string>
+    <string name="refresh">تحديث</string>
+    <string name="all_channels">كل القنوات</string>
+    <string name="favorites">المفضلة ★</string>
+    <string name="empty_state">لا توجد قنوات بعد.\nاضغط \"إضافة قائمة\" وأدخل رابط M3U أو بيانات Xtream.</string>
+    <string name="dialog_title">إضافة قائمة قنوات</string>
+    <string name="m3u_url_hint">رابط M3U</string>
+    <string name="or_xtream">أو بيانات Xtream Codes</string>
+    <string name="server_hint">السيرفر (مثال: http://host:port)</string>
+    <string name="user_hint">اسم المستخدم</string>
+    <string name="pass_hint">كلمة المرور</string>
+    <string name="pick_file">اختيار ملف M3U من الجهاز</string>
+    <string name="load">تحميل</string>
+    <string name="cancel">إلغاء</string>
+    <string name="loading_failed">تعذر تحميل القائمة: %1$s</string>
+    <string name="no_input">أدخل رابط M3U أو بيانات Xtream كاملة</string>
+    <string name="no_refresh_source">القائمة من ملف محلي، اختر الملف مرة أخرى للتحديث</string>
+    <string name="playback_error">خطأ في التشغيل: %1$s</string>
+    <string name="channels_count">%1$d قناة</string>
+    <string name="added_fav">أُضيفت للمفضلة</string>
+    <string name="removed_fav">أُزيلت من المفضلة</string>
+</resources>
