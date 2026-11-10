@@ -68,6 +68,8 @@ class MainActivity : AppCompatActivity() {
     private var query = ""
     private var lastPoster = false
     private var returnedFromPlayer = false
+    private var topHidden = false
+    private lateinit var topBlock: View
 
     private val handler = Handler(Looper.getMainLooper())
     private val searchRunnable = Runnable { renderList() }
@@ -75,6 +77,12 @@ class MainActivity : AppCompatActivity() {
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             when {
+                topHidden -> {
+                    // First Back brings the header (search + sections) back.
+                    setTopVisible(true)
+                    sectionsRv.post { sectionsRv.getChildAt(0)?.requestFocus() }
+                    return
+                }
                 episodes != null -> episodes = null
                 query.isNotBlank() -> { query = ""; searchBox.setText("") }
             }
@@ -107,6 +115,7 @@ class MainActivity : AppCompatActivity() {
         sectionsRv = findViewById(R.id.chips_sections)
         groupsRv = findViewById(R.id.chips_groups)
         recycler = findViewById(R.id.list)
+        topBlock = findViewById(R.id.top_block)
 
         applyTheme()
 
@@ -121,6 +130,13 @@ class MainActivity : AppCompatActivity() {
         recycler.setHasFixedSize(true)
         recycler.itemAnimator = null
         recycler.setItemViewCacheSize(20)
+        // Scrolling down hides the header/search/chips so the list gets the whole screen.
+        recycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                if (dy > 6 && rv.canScrollVertically(-1)) setTopVisible(false)
+                else if (dy < -6 || !rv.canScrollVertically(-1)) setTopVisible(true)
+            }
+        })
 
         sectionAdapter = ChipAdapter { onSectionClick(it) }
         groupAdapter = ChipAdapter { onGroupClick(it) }
@@ -184,6 +200,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_settings).setTextColor(AppTheme.accent)
         window.statusBarColor = AppTheme.header
         window.navigationBarColor = AppTheme.bg
+    }
+
+    private fun setTopVisible(visible: Boolean) {
+        if (visible == !topHidden) return
+        topHidden = !visible
+        topBlock.visibility = if (visible) View.VISIBLE else View.GONE
+        backCallback.isEnabled = episodes != null || query.isNotBlank() || topHidden
     }
 
     // ---------------------------------------------------------------- loading
@@ -378,7 +401,7 @@ class MainActivity : AppCompatActivity() {
         count.text = getString(R.string.items_count, items.size)
         listEmpty.setText(if (group == RESUME && eps == null) R.string.nothing_to_resume else R.string.no_results)
         listEmpty.visibility = if (all.isNotEmpty() && items.isEmpty()) View.VISIBLE else View.GONE
-        backCallback.isEnabled = eps != null || query.isNotBlank()
+        backCallback.isEnabled = eps != null || query.isNotBlank() || topHidden
     }
 
     // ---------------------------------------------------------------- actions
