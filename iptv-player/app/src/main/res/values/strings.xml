@@ -23,4 +23,10 @@
     <string name="channels_count">%1$d قناة</string>
     <string name="added_fav">أُضيفت للمفضلة</string>
     <string name="removed_fav">أُزيلت من المفضلة</string>
+    <string name="items_count">%1$d عنصر</string>
+    <string name="kind_live">القنوات المباشرة</string>
+    <string name="kind_vod">الأفلام</string>
+    <string name="kind_series">المسلسلات</string>
+    <string name="all_in_section">الكل</string>
+    <string name="not_xtream">فتح الحلقات يحتاج اشتراك Xtream</string>
 </resources>

@@ -59,12 +59,12 @@ class ChannelAdapter(
     }
 }
 
-data class GroupItem(val label: String, val count: Int, val pos: Int)
+data class GroupItem(val label: String, val count: Int, val key: String)
 
 class GroupAdapter(
     private val onClick: (GroupItem) -> Unit
 ) : ListAdapter<GroupItem, GroupAdapter.VH>(object : DiffUtil.ItemCallback<GroupItem>() {
-    override fun areItemsTheSame(a: GroupItem, b: GroupItem) = a.pos == b.pos
+    override fun areItemsTheSame(a: GroupItem, b: GroupItem) = a.key == b.key
     override fun areContentsTheSame(a: GroupItem, b: GroupItem) = a == b
 }) {
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -87,7 +87,7 @@ class GroupAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val g = getItem(position)
         holder.name.text = g.label
-        holder.count.text = holder.itemView.context.getString(R.string.channels_count, g.count)
+        holder.count.text = holder.itemView.context.getString(R.string.items_count, g.count)
         holder.star.visibility = View.GONE
         holder.logo.setImageResource(R.drawable.ic_tv)
     }
