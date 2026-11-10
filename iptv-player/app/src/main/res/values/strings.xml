@@ -45,4 +45,18 @@
     <string name="resize_fit">ملاءمة</string>
     <string name="resize_fill">تعبئة</string>
     <string name="resize_zoom">تكبير</string>
+    <string name="settings">المظهر</string>
+    <string name="settings_title">المظهر واللغة</string>
+    <string name="presets">أنماط جاهزة</string>
+    <string name="c_bg">لون الخلفية</string>
+    <string name="c_header">لون الهيدر</string>
+    <string name="c_card">لون الكروت</string>
+    <string name="c_text">لون الخط</string>
+    <string name="c_accent">اللون المميز (الأزرار والتحديد)</string>
+    <string name="language">اللغة</string>
+    <string name="reset">إعادة الضبط</string>
+    <string name="done">تم</string>
+    <string name="pick_color">اختر اللون</string>
+    <string name="epg_now">الآن: %1$s</string>
+    <string name="epg_next">التالي: %1$s</string>
 </resources>

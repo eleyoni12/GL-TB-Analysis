@@ -1,10 +1,15 @@
 package app.iptvplayer
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
@@ -15,14 +20,11 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,16 +43,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var cacheFile: File
     private lateinit var adapter: ChannelAdapter
+    private lateinit var sectionAdapter: ChipAdapter
+    private lateinit var groupAdapter: ChipAdapter
     private lateinit var recycler: RecyclerView
+    private lateinit var sectionsRv: RecyclerView
+    private lateinit var groupsRv: RecyclerView
     private lateinit var searchBox: EditText
     private lateinit var groupTitle: TextView
     private lateinit var progress: ProgressBar
     private lateinit var empty: TextView
     private lateinit var listEmpty: TextView
     private lateinit var count: TextView
-    private lateinit var sectionChips: ChipGroup
-    private lateinit var groupChips: ChipGroup
-    private lateinit var groupScroll: View
 
     private var all: List<Channel> = emptyList()
     private var byKind: Map<String, List<Channel>> = emptyMap()
@@ -64,6 +67,10 @@ class MainActivity : AppCompatActivity() {
     private var episodesTitle = ""
     private var query = ""
     private var lastPoster = false
+    private var returnedFromPlayer = false
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val searchRunnable = Runnable { renderList() }
 
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -81,12 +88,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTheme.load(this)
         setContentView(R.layout.activity_main)
 
         History.init(this)
         prefs = getSharedPreferences("iptv", Context.MODE_PRIVATE)
         cacheFile = File(filesDir, "playlist.m3u")
         favorites.addAll(prefs.getStringSet("favs", emptySet()).orEmpty())
+        Epg.source = prefs.getString("source_url", null)
         onBackPressedDispatcher.addCallback(this, backCallback)
 
         groupTitle = findViewById(R.id.group_title)
@@ -95,9 +104,11 @@ class MainActivity : AppCompatActivity() {
         listEmpty = findViewById(R.id.list_empty)
         count = findViewById(R.id.count)
         searchBox = findViewById(R.id.search)
-        sectionChips = findViewById(R.id.chips_sections)
-        groupChips = findViewById(R.id.chips_groups)
-        groupScroll = findViewById(R.id.scroll_groups)
+        sectionsRv = findViewById(R.id.chips_sections)
+        groupsRv = findViewById(R.id.chips_groups)
+        recycler = findViewById(R.id.list)
+
+        applyTheme()
 
         adapter = ChannelAdapter(
             isFavorite = { it.url in favorites },
@@ -105,13 +116,25 @@ class MainActivity : AppCompatActivity() {
             onClick = { onChannelClick(it) },
             onLongClick = { toggleFavorite(it) }
         )
-        recycler = findViewById(R.id.list)
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
+        recycler.setHasFixedSize(true)
+        recycler.itemAnimator = null
+        recycler.setItemViewCacheSize(20)
+
+        sectionAdapter = ChipAdapter { onSectionClick(it) }
+        groupAdapter = ChipAdapter { onGroupClick(it) }
+        for ((rv, ad) in listOf(sectionsRv to sectionAdapter, groupsRv to groupAdapter)) {
+            rv.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            rv.adapter = ad
+            rv.itemAnimator = null
+        }
+        groupsRv.visibility = View.GONE
 
         searchBox.doAfterTextChanged {
             query = it?.toString().orEmpty()
-            renderList()
+            handler.removeCallbacks(searchRunnable)
+            handler.postDelayed(searchRunnable, 250) // don't filter on every keystroke
         }
         groupTitle.setOnClickListener {
             if (episodes != null) {
@@ -121,19 +144,50 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btn_add).setOnClickListener { showAddDialog() }
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { refresh() }
+        findViewById<Button>(R.id.btn_settings).setOnClickListener { SettingsDialog.show(this) { recreate() } }
         empty.setOnClickListener { showAddDialog() }
 
-        groupScroll.visibility = View.GONE
         if (cacheFile.exists()) loadCached()
         updateEmpty()
     }
 
     override fun onResume() {
         super.onResume()
-        if (all.isNotEmpty()) {
+        if (returnedFromPlayer && all.isNotEmpty()) {
+            returnedFromPlayer = false
             renderList()
             adapter.notifyDataSetChanged() // refresh progress bars after watching
         }
+    }
+
+    /** Colors come from [AppTheme] so the user can change them. */
+    private fun applyTheme() {
+        val d = resources.displayMetrics.density
+        findViewById<View>(R.id.root).setBackgroundColor(AppTheme.bg)
+        findViewById<View>(R.id.header).background = AppTheme.headerDrawable(d)
+        findViewById<TextView>(R.id.badge).apply {
+            background = AppTheme.rounded(AppTheme.accent, 12 * d)
+            setTextColor(AppTheme.onAccent)
+        }
+        findViewById<TextView>(R.id.app_title).setTextColor(AppTheme.accent)
+        findViewById<TextView>(R.id.app_subtitle_tv).setTextColor(AppTheme.muted)
+        searchBox.apply {
+            background = AppTheme.searchSelector(d)
+            setTextColor(AppTheme.text)
+            setHintTextColor(AppTheme.muted)
+        }
+        groupTitle.setTextColor(AppTheme.accent)
+        count.setTextColor(AppTheme.muted)
+        empty.setTextColor(AppTheme.text)
+        listEmpty.setTextColor(AppTheme.muted)
+        findViewById<Button>(R.id.btn_add).apply {
+            backgroundTintList = ColorStateList.valueOf(AppTheme.accent)
+            setTextColor(AppTheme.onAccent)
+        }
+        findViewById<Button>(R.id.btn_refresh).setTextColor(AppTheme.accent)
+        findViewById<Button>(R.id.btn_settings).setTextColor(AppTheme.accent)
+        window.statusBarColor = AppTheme.header
+        window.navigationBarColor = AppTheme.bg
     }
 
     // ---------------------------------------------------------------- loading
@@ -167,6 +221,7 @@ class MainActivity : AppCompatActivity() {
             setLoading(false)
             result.onSuccess {
                 prefs.edit().putString("source_url", url).apply()
+                Epg.source = url
                 setChannels(it)
             }.onFailure { showError(it) }
         }
@@ -186,6 +241,7 @@ class MainActivity : AppCompatActivity() {
             setLoading(false)
             result.onSuccess {
                 prefs.edit().remove("source_url").apply()
+                Epg.source = null
                 setChannels(it)
             }.onFailure { showError(it) }
         }
@@ -215,10 +271,21 @@ class MainActivity : AppCompatActivity() {
         episodes = null
         query = ""
         searchBox.setText("")
-        rebuildSectionChips()
+        sectionAdapter.submit(
+            (KINDS.filter { byKind[it].orEmpty().isNotEmpty() } + FAV).map { ChipAdapter.Item(it, kindLabel(it)) },
+            section
+        )
         rebuildGroupChips()
         renderList()
         updateEmpty()
+        focusFirstChipOnTv()
+    }
+
+    private fun focusFirstChipOnTv() {
+        val ui = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        if (ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) {
+            sectionsRv.post { sectionsRv.getChildAt(0)?.requestFocus() }
+        }
     }
 
     private fun kindLabel(kind: String) = when (kind) {
@@ -228,54 +295,44 @@ class MainActivity : AppCompatActivity() {
         else -> getString(R.string.favorites)
     }
 
-    private fun makeChip(label: String, checked: Boolean, onClick: () -> Unit): Chip =
-        Chip(this).apply {
-            text = label
-            isCheckable = true
-            isCheckedIconVisible = false
-            chipStrokeWidth = 0f
-            chipBackgroundColor = AppCompatResources.getColorStateList(this@MainActivity, R.color.chip_bg)
-            setTextColor(AppCompatResources.getColorStateList(this@MainActivity, R.color.chip_text))
-            isChecked = checked
-            setOnClickListener { onClick() }
-        }
+    private fun onSectionClick(k: String) {
+        if (k == section) return
+        section = k
+        group = ALL
+        episodes = null
+        sectionAdapter.select(k)
+        rebuildGroupChips()
+        renderList()
+    }
 
-    private fun rebuildSectionChips() {
-        sectionChips.removeAllViews()
-        val keys = KINDS.filter { byKind[it].orEmpty().isNotEmpty() } + FAV
-        for (k in keys) {
-            sectionChips.addView(makeChip(kindLabel(k), k == section) {
-                if (section != k) {
-                    section = k
-                    group = ALL
-                    episodes = null
-                    rebuildGroupChips()
-                    renderList()
-                }
-            })
-        }
+    private fun onGroupClick(k: String) {
+        group = k
+        episodes = null
+        groupAdapter.select(k)
+        renderList()
     }
 
     private fun rebuildGroupChips() {
-        groupChips.removeAllViews()
         if (all.isEmpty() || section == FAV) {
-            groupScroll.visibility = View.GONE
+            groupsRv.visibility = View.GONE
             return
         }
-        groupScroll.visibility = View.VISIBLE
+        groupsRv.visibility = View.VISIBLE
         val keys = listOf(RESUME, ALL) + groupsByKind[section].orEmpty()
-        for (k in keys) {
-            val label = when (k) {
-                RESUME -> getString(R.string.resume_watching)
-                ALL -> getString(R.string.all_in_section)
-                else -> k
-            }
-            groupChips.addView(makeChip(label, k == group) {
-                group = k
-                episodes = null
-                renderList()
-            })
-        }
+        groupAdapter.submit(
+            keys.map {
+                ChipAdapter.Item(
+                    it,
+                    when (it) {
+                        RESUME -> getString(R.string.resume_watching)
+                        ALL -> getString(R.string.all_in_section)
+                        else -> it
+                    }
+                )
+            },
+            group
+        )
+        groupsRv.scrollToPosition(0)
     }
 
     // ------------------------------------------------------------------- list
@@ -294,7 +351,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun spanCount(): Int {
         val dm = resources.displayMetrics
-        return (dm.widthPixels / dm.density / 120f).toInt().coerceIn(2, 8)
+        return (dm.widthPixels / dm.density / 140f).toInt().coerceIn(2, 7)
     }
 
     private fun renderList() {
@@ -326,6 +383,7 @@ class MainActivity : AppCompatActivity() {
         }
         val playable = shown.filter { !it.url.startsWith(Playlist.SERIES_SCHEME) }
         Session.channels = playable
+        returnedFromPlayer = true
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("index", playable.indexOf(ch).coerceAtLeast(0)))
     }
 

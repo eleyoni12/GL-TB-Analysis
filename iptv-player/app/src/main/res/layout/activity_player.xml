@@ -13,16 +13,30 @@
         app:show_buffering="when_playing"
         app:use_controller="true" />
 
-    <TextView
-        android:id="@+id/title"
+    <LinearLayout
+        android:id="@+id/info_box"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:background="#880B1426"
-        android:padding="10dp"
-        android:textColor="#D4AF37"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#D4AF37"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/epg"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#F2F4F8"
+            android:textSize="13sp" />
+    </LinearLayout>
 
     <Button
         android:id="@+id/btn_picture"

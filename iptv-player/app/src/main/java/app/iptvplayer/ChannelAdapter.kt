@@ -1,5 +1,6 @@
 package app.iptvplayer
 
+import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,6 +11,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import com.google.android.material.card.MaterialCardView
 
 /** Shows channels as rows, or as poster cards when [poster] is true. */
 class ChannelAdapter(
@@ -32,8 +34,27 @@ class ChannelAdapter(
         val group: TextView = view.findViewById(R.id.group)
         val star: TextView = view.findViewById(R.id.star)
         val progress: ProgressBar = view.findViewById(R.id.watch_progress)
+        var boundUrl: String? = null
 
         init {
+            val d = view.resources.displayMetrics.density
+            if (view is MaterialCardView) {
+                view.setCardBackgroundColor(AppTheme.card)
+                view.strokeColor = AppTheme.accent
+                logo.setBackgroundColor(AppTheme.header)
+            } else {
+                view.background = AppTheme.cardSelector(d)
+            }
+            name.setTextColor(AppTheme.text)
+            group.setTextColor(AppTheme.muted)
+            star.setTextColor(AppTheme.accent)
+            progress.progressTintList = ColorStateList.valueOf(AppTheme.accent)
+
+            // Clear "where am I" feedback for remote-control navigation.
+            view.setOnFocusChangeListener { v, has ->
+                v.animate().scaleX(if (has) 1.05f else 1f).scaleY(if (has) 1.05f else 1f).setDuration(100).start()
+                if (v is MaterialCardView) v.strokeWidth = if (has) (3 * d).toInt() else 0
+            }
             view.setOnClickListener {
                 val p = bindingAdapterPosition
                 if (p != RecyclerView.NO_POSITION) onClick(p)
@@ -55,9 +76,19 @@ class ChannelAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val ch = getItem(position)
+        holder.boundUrl = ch.url
         holder.name.text = ch.name
         holder.group.text = ch.group
         holder.star.visibility = if (isFavorite(ch)) View.VISIBLE else View.GONE
+
+        // Program guide (now playing) for live channels, when the provider has it.
+        if (!poster && ch.kind == "live") {
+            Epg.get(ch) { info ->
+                if (holder.boundUrl == ch.url && info != null && info.now.isNotEmpty()) {
+                    holder.group.text = "▶ " + info.now + if (info.next.isNotEmpty()) "   ›   " + info.next else ""
+                }
+            }
+        }
 
         val pr = progressOf(ch)
         if (pr in 1..99) {
@@ -74,7 +105,8 @@ class ChannelAdapter(
             holder.logo.load(url) {
                 placeholder(R.drawable.ic_tv)
                 error(R.drawable.ic_tv)
-                crossfade(true)
+                size(if (poster) 240 else 120, if (poster) 360 else 120)
+                bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
                 addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
             }
         }

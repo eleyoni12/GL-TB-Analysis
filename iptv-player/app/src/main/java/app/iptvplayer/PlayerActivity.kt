@@ -42,6 +42,8 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var titleView: TextView
     private lateinit var pictureBtn: View
+    private lateinit var infoBox: View
+    private lateinit var epgView: TextView
     private lateinit var prefs: SharedPreferences
     private val stage = HashMap<Int, Int>()
     private val handler = Handler(Looper.getMainLooper())
@@ -57,16 +59,21 @@ class PlayerActivity : AppCompatActivity() {
         setContentView(R.layout.activity_player)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         History.init(this)
+        AppTheme.load(this)
         prefs = getSharedPreferences("iptv", MODE_PRIVATE)
 
         playerView = findViewById(R.id.player_view)
         titleView = findViewById(R.id.title)
         pictureBtn = findViewById(R.id.btn_picture)
+        infoBox = findViewById(R.id.info_box)
+        epgView = findViewById(R.id.epg)
+        titleView.setTextColor(AppTheme.accent)
+        (pictureBtn as? android.widget.Button)?.setTextColor(AppTheme.accent)
         pictureBtn.setOnClickListener { showPictureDialog() }
         playerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->
                 val v = if (visibility == View.VISIBLE) View.VISIBLE else View.GONE
-                titleView.visibility = v
+                infoBox.visibility = v
                 pictureBtn.visibility = v
             }
         )
@@ -137,6 +144,7 @@ class PlayerActivity : AppCompatActivity() {
                 titleView.text = mediaItem?.mediaMetadata?.title ?: ""
                 val p = player ?: return
                 Session.channels.getOrNull(p.currentMediaItemIndex)?.let { History.touch(it) }
+                loadEpg()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -177,6 +185,26 @@ class PlayerActivity : AppCompatActivity() {
         exo.prepare()
         exo.playWhenReady = true
         handler.postDelayed(saver, 5_000)
+        loadEpg()
+    }
+
+    // ----------------------------------------------------------------- EPG
+
+    /** Shows "now / next" program for live Xtream channels, when the provider supplies a guide. */
+    private fun loadEpg() {
+        val p = player ?: return
+        val ch = Session.channels.getOrNull(p.currentMediaItemIndex) ?: return
+        epgView.text = ""
+        if (ch.kind != "live") return
+        Epg.get(ch) { info ->
+            val cur = player?.let { Session.channels.getOrNull(it.currentMediaItemIndex) }
+            if (cur?.url == ch.url && info != null) {
+                val lines = ArrayList<String>()
+                if (info.now.isNotEmpty()) lines.add(getString(R.string.epg_now, info.now))
+                if (info.next.isNotEmpty()) lines.add(getString(R.string.epg_next, info.next))
+                epgView.text = lines.joinToString("\n")
+            }
+        }
     }
 
     // ------------------------------------------------------------- picture
