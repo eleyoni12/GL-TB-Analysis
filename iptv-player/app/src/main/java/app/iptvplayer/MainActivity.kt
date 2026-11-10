@@ -165,10 +165,6 @@ class MainActivity : AppCompatActivity() {
         val d = resources.displayMetrics.density
         findViewById<View>(R.id.root).setBackgroundColor(AppTheme.bg)
         findViewById<View>(R.id.header).background = AppTheme.headerDrawable(d)
-        findViewById<TextView>(R.id.badge).apply {
-            background = AppTheme.rounded(AppTheme.accent, 12 * d)
-            setTextColor(AppTheme.onAccent)
-        }
         findViewById<TextView>(R.id.app_title).setTextColor(AppTheme.accent)
         findViewById<TextView>(R.id.app_subtitle_tv).setTextColor(AppTheme.muted)
         searchBox.apply {
@@ -214,15 +210,23 @@ class MainActivity : AppCompatActivity() {
             setLoading(true)
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    Playlist.downloadSmart(url, cacheFile)
-                    Playlist.parse(cacheFile)
+                    val used = Playlist.downloadSmart(url, cacheFile)
+                    used to Playlist.parse(cacheFile)
                 }
             }
             setLoading(false)
-            result.onSuccess {
-                prefs.edit().putString("source_url", url).apply()
-                Epg.source = url
-                setChannels(it)
+            result.onSuccess { (used, list) ->
+                prefs.edit().putString("source_url", used).apply()
+                Epg.source = used
+                setChannels(list)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(
+                        R.string.loaded_summary,
+                        list.count { it.kind == "live" }, list.count { it.kind == "vod" }, list.count { it.kind == "series" }
+                    ),
+                    Toast.LENGTH_LONG
+                ).show()
             }.onFailure { showError(it) }
         }
     }
@@ -248,7 +252,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showError(t: Throwable) {
-        Toast.makeText(this, getString(R.string.loading_failed, t.message ?: t.javaClass.simpleName), Toast.LENGTH_LONG).show()
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.load_failed_title)
+            .setMessage(t.message ?: t.javaClass.simpleName)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun setLoading(on: Boolean) {
@@ -424,7 +432,6 @@ class MainActivity : AppCompatActivity() {
         val etServer = view.findViewById<EditText>(R.id.et_server)
         val etUser = view.findViewById<EditText>(R.id.et_user)
         val etPass = view.findViewById<EditText>(R.id.et_pass)
-        etUrl.setText(prefs.getString("source_url", "")?.takeIf { !it.contains("get.php?username=") }.orEmpty())
 
         val dialog = MaterialAlertDialogBuilder(this)
             .setTitle(R.string.dialog_title)
@@ -442,10 +449,11 @@ class MainActivity : AppCompatActivity() {
                 val server = etServer.text.toString()
                 val user = etUser.text.toString()
                 val pass = etPass.text.toString()
+                // Xtream details win when completely filled; otherwise use the M3U link.
                 val finalUrl = when {
-                    url.isNotEmpty() -> url
                     server.isNotBlank() && user.isNotBlank() && pass.isNotBlank() ->
                         Playlist.xtreamUrl(server, user, pass)
+                    url.isNotEmpty() -> url
                     else -> null
                 }
                 if (finalUrl == null) {

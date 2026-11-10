@@ -77,11 +77,31 @@ object Playlist {
         return Triple(base, user, pass)
     }
 
+    class LoginException(msg: String) : IOException(msg)
+
+    /** Returns the URL that actually worked (an http link may only work as https). */
+    fun downloadSmart(urlStr: String, dest: File): String {
+        try {
+            downloadSmartOnce(urlStr, dest)
+            return urlStr
+        } catch (e: Exception) {
+            if (e !is LoginException && urlStr.startsWith("http://") && xtreamCreds(urlStr) != null) {
+                val https = "https://" + urlStr.removePrefix("http://")
+                try {
+                    downloadSmartOnce(https, dest)
+                    return https
+                } catch (_: Exception) {
+                }
+            }
+            throw e
+        }
+    }
+
     /**
      * For Xtream links, builds the full list (live + movies + series) through player_api.php,
      * and falls back to the plain get.php playlist if that fails. Other URLs download as-is.
      */
-    fun downloadSmart(urlStr: String, dest: File) {
+    private fun downloadSmartOnce(urlStr: String, dest: File) {
         val creds = xtreamCreds(urlStr)
         if (creds == null) {
             download(urlStr, dest)
@@ -89,12 +109,30 @@ object Playlist {
         }
         try {
             xtreamViaApi(creds.first, creds.second, creds.third, dest)
+        } catch (login: LoginException) {
+            throw login
         } catch (apiError: Exception) {
             try {
                 download(urlStr, dest)
             } catch (e: IOException) {
                 throw IOException("player_api: ${apiError.message} | get.php: ${e.message}")
             }
+        }
+    }
+
+    private fun checkLogin(api: String, tmp: File) {
+        download(api, tmp)
+        val obj = try {
+            JSONObject(tmp.readText())
+        } catch (e: Exception) {
+            throw IOException("الرد ليس بيانات Xtream، تأكد من السيرفر والبورت")
+        }
+        val ui = obj.optJSONObject("user_info") ?: throw IOException("السيرفر لا يدعم Xtream API")
+        val auth = ui.opt("auth")?.toString()
+        if (auth == "0" || auth == "false") throw LoginException("اسم المستخدم أو كلمة المرور غير صحيحة")
+        val status = ui.optString("status")
+        if (status.isNotEmpty() && !status.equals("Active", ignoreCase = true)) {
+            throw LoginException("حالة الاشتراك: $status")
         }
     }
 
@@ -140,6 +178,7 @@ object Playlist {
         var total = 0
         var firstError: Exception? = null
         try {
+            checkLogin(api, tmp)
             gen.bufferedWriter().use { w ->
                 w.write("#EXTM3U\n")
 

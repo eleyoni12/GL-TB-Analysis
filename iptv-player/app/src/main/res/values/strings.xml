@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">IPTV Player</string>
+    <string name="app_name">Aey</string>
     <string name="search_hint">ابحث عن قناة…</string>
     <string name="add_playlist">إضافة قائمة</string>
     <string name="refresh">تحديث</string>
@@ -29,7 +29,7 @@
     <string name="kind_series">المسلسلات</string>
     <string name="all_in_section">الكل</string>
     <string name="not_xtream">فتح الحلقات يحتاج اشتراك Xtream</string>
-    <string name="app_subtitle">مشغّل قوائم IPTV · يعمل بالريموت أيضًا</string>
+    <string name="app_subtitle">مشغّل IPTV · يعمل بالريموت أيضًا</string>
     <string name="resume_watching">▶ استكمال المشاهدة</string>
     <string name="nothing_to_resume">لا يوجد ما يمكن استكماله بعد</string>
     <string name="no_results">لا توجد نتائج</string>
@@ -59,4 +59,6 @@
     <string name="pick_color">اختر اللون</string>
     <string name="epg_now">الآن: %1$s</string>
     <string name="epg_next">التالي: %1$s</string>
+    <string name="load_failed_title">تعذر تحميل القائمة</string>
+    <string name="loaded_summary">تم التحميل: %1$d قناة · %2$d فيلم · %3$d مسلسل</string>
 </resources>
