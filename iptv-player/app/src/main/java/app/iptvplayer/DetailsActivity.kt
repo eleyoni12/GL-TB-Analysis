@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -174,11 +175,15 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
+    private fun seasonOf(ep: Channel): Int =
+        Regex("^S(\\d+)E").find(ep.name)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+
+    /** Season buttons on top; only the chosen season's episodes are listed below. */
     private fun showEpisodes(eps: List<Channel>) {
         val box = findViewById<LinearLayout>(R.id.d_episodes)
         box.removeAllViews()
         val d = resources.displayMetrics.density
-        var lastSeason = -1
+        val seasons = eps.map { seasonOf(it) }.distinct().sorted()
 
         // First button: play the first episode (or the one in progress).
         val inProgress = eps.indexOfFirst { History.progress(it.url) in 1..94 }
@@ -188,35 +193,66 @@ class DetailsActivity : AppCompatActivity() {
         playBtn.setOnClickListener { play(eps, startIdx, false) }
         playBtn.post { playBtn.requestFocus() }
 
-        eps.forEachIndexed { i, ep ->
-            val season = Regex("^S(\\d+)E").find(ep.name)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            if (season != lastSeason) {
-                lastSeason = season
-                box.addView(TextView(this).apply {
-                    text = getString(R.string.season_label, season)
-                    setTextColor(AppTheme.accent)
-                    textSize = 16f
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setPadding(0, (12 * d).toInt(), 0, (6 * d).toInt())
-                })
+        var current = seasonOf(eps[startIdx])
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val chips = LinkedHashMap<Int, TextView>()
+
+        fun render() {
+            list.removeAllViews()
+            eps.forEachIndexed { i, ep -> if (seasonOf(ep) == current) list.addView(episodeRow(ep, i, eps, d)) }
+            for ((s, tv) in chips) {
+                tv.isSelected = s == current
+                tv.setTextColor(if (s == current) AppTheme.onAccent else AppTheme.text)
             }
-            val pr = History.progress(ep.url)
-            box.addView(TextView(this).apply {
-                text = ep.name.substringAfter("  ", ep.name).let { t ->
-                    val num = Regex("^S\\d+E(\\d+)").find(ep.name)?.groupValues?.get(1)
-                    (if (num != null) "$num.  " else "") + t + if (pr in 1..99) "   ($pr%)" else ""
+        }
+
+        if (seasons.size > 1) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (s in seasons) {
+                val tv = TextView(this).apply {
+                    text = getString(R.string.season_label, s)
+                    textSize = 14f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setPadding((16 * d).toInt(), (9 * d).toInt(), (16 * d).toInt(), (9 * d).toInt())
+                    background = AppTheme.chipSelector(d)
+                    isFocusable = true
+                    isClickable = true
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins((3 * d).toInt(), 0, (3 * d).toInt(), (8 * d).toInt()) }
+                    setOnClickListener {
+                        current = s
+                        render()
+                    }
                 }
-                setTextColor(AppTheme.text)
-                textSize = 15f
-                setPadding((14 * d).toInt(), (12 * d).toInt(), (14 * d).toInt(), (12 * d).toInt())
-                background = AppTheme.cardSelector(d)
-                isFocusable = true
-                isClickable = true
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(0, (3 * d).toInt(), 0, (3 * d).toInt()) }
-                setOnClickListener { play(eps, i, false) }
+                chips[s] = tv
+                row.addView(tv)
+            }
+            box.addView(HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(row)
             })
+        }
+        box.addView(list)
+        render()
+    }
+
+    private fun episodeRow(ep: Channel, index: Int, all: List<Channel>, d: Float): TextView {
+        val pr = History.progress(ep.url)
+        val num = Regex("^S\\d+E(\\d+)").find(ep.name)?.groupValues?.get(1)
+        val title = ep.name.substringAfter("  ", ep.name)
+        return TextView(this).apply {
+            text = (if (num != null) "$num.  " else "") + title + if (pr in 1..99) "   ($pr%)" else ""
+            setTextColor(AppTheme.text)
+            textSize = 15f
+            setPadding((14 * d).toInt(), (12 * d).toInt(), (14 * d).toInt(), (12 * d).toInt())
+            background = AppTheme.cardSelector(d)
+            isFocusable = true
+            isClickable = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, (3 * d).toInt(), 0, (3 * d).toInt()) }
+            setOnClickListener { play(all, index, false) }
         }
     }
 
