@@ -58,3 +58,37 @@ class ChannelAdapter(
         }
     }
 }
+
+data class GroupItem(val label: String, val count: Int, val pos: Int)
+
+class GroupAdapter(
+    private val onClick: (GroupItem) -> Unit
+) : ListAdapter<GroupItem, GroupAdapter.VH>(object : DiffUtil.ItemCallback<GroupItem>() {
+    override fun areItemsTheSame(a: GroupItem, b: GroupItem) = a.pos == b.pos
+    override fun areContentsTheSame(a: GroupItem, b: GroupItem) = a == b
+}) {
+    inner class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val logo: ImageView = view.findViewById(R.id.logo)
+        val name: TextView = view.findViewById(R.id.name)
+        val count: TextView = view.findViewById(R.id.group)
+        val star: TextView = view.findViewById(R.id.star)
+
+        init {
+            view.setOnClickListener {
+                val p = bindingAdapterPosition
+                if (p != RecyclerView.NO_POSITION) onClick(getItem(p))
+            }
+        }
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
+        VH(LayoutInflater.from(parent.context).inflate(R.layout.item_channel, parent, false))
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val g = getItem(position)
+        holder.name.text = g.label
+        holder.count.text = holder.itemView.context.getString(R.string.channels_count, g.count)
+        holder.star.visibility = View.GONE
+        holder.logo.setImageResource(R.drawable.ic_tv)
+    }
+}

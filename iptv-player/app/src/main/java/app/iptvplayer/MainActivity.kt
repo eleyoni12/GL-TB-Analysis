@@ -7,14 +7,12 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
@@ -32,7 +30,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var cacheFile: File
     private lateinit var adapter: ChannelAdapter
-    private lateinit var spinner: Spinner
+    private lateinit var recycler: RecyclerView
+    private lateinit var groupAdapter: GroupAdapter
+    private lateinit var groupTitle: TextView
+    private lateinit var searchBox: EditText
     private lateinit var progress: ProgressBar
     private lateinit var empty: TextView
     private lateinit var count: TextView
@@ -40,7 +41,10 @@ class MainActivity : AppCompatActivity() {
     private var all: List<Channel> = emptyList()
     private var shown: List<Channel> = emptyList()
     private var groupNames: List<String> = emptyList()
-    private var groupPos = 0
+    private var groupPos = -1 // -1 = home (list of groups); 0 = all; 1 = favorites; >=2 = a group
+    private val backCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = goHome()
+    }
     private var query = ""
     private val favorites = HashSet<String>()
 
@@ -56,7 +60,8 @@ class MainActivity : AppCompatActivity() {
         cacheFile = File(filesDir, "playlist.m3u")
         favorites.addAll(prefs.getStringSet("favs", emptySet()).orEmpty())
 
-        spinner = findViewById(R.id.group_spinner)
+        groupTitle = findViewById(R.id.group_title)
+        onBackPressedDispatcher.addCallback(this, backCallback)
         progress = findViewById(R.id.progress)
         empty = findViewById(R.id.empty)
         count = findViewById(R.id.count)
@@ -66,26 +71,23 @@ class MainActivity : AppCompatActivity() {
             onClick = { play(it) },
             onLongClick = { toggleFavorite(it) }
         )
-        findViewById<RecyclerView>(R.id.list).apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = this@MainActivity.adapter
+        groupAdapter = GroupAdapter { g ->
+            groupPos = g.pos
+            render()
         }
+        recycler = findViewById(R.id.list)
+        recycler.layoutManager = LinearLayoutManager(this)
 
-        findViewById<EditText>(R.id.search).doAfterTextChanged {
+        searchBox = findViewById(R.id.search)
+        searchBox.doAfterTextChanged {
             query = it?.toString().orEmpty()
-            applyFilter()
-        }
-        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                groupPos = pos
-                applyFilter()
-            }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
+            render()
         }
         findViewById<Button>(R.id.btn_add).setOnClickListener { showAddDialog() }
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { refresh() }
         empty.setOnClickListener { showAddDialog() }
 
+        render()
         if (cacheFile.exists()) loadCached()
         updateEmpty()
     }
@@ -163,21 +165,59 @@ class MainActivity : AppCompatActivity() {
     private fun setChannels(list: List<Channel>) {
         all = list
         groupNames = list.map { it.group }.distinct().sorted()
-        val labels = listOf(getString(R.string.all_channels), getString(R.string.favorites)) + groupNames
-        groupPos = 0
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-        spinner.setSelection(0)
-        applyFilter()
+        groupPos = -1
+        query = ""
+        searchBox.setText("")
+        render()
         updateEmpty()
+    }
+
+    private fun groupLabel(pos: Int): String = when (pos) {
+        0 -> getString(R.string.all_channels)
+        1 -> getString(R.string.favorites)
+        else -> groupNames.getOrNull(pos - 2).orEmpty()
+    }
+
+    private fun groupItems(): List<GroupItem> {
+        if (all.isEmpty()) return emptyList()
+        val counts = all.groupingBy { it.group }.eachCount()
+        val favCount = all.count { it.url in favorites }
+        return listOf(
+            GroupItem(getString(R.string.all_channels), all.size, 0),
+            GroupItem(getString(R.string.favorites), favCount, 1)
+        ) + groupNames.mapIndexed { i, n -> GroupItem(n, counts[n] ?: 0, i + 2) }
+    }
+
+    /** Home = list of groups. Opening a group (or searching) shows channels; Back returns home. */
+    private fun render() {
+        val searching = query.isNotBlank()
+        if (groupPos < 0 && !searching) {
+            if (recycler.adapter !== groupAdapter) recycler.adapter = groupAdapter
+            groupAdapter.submitList(groupItems())
+            groupTitle.text = ""
+            count.text = if (all.isEmpty()) "" else getString(R.string.channels_count, all.size)
+        } else {
+            if (recycler.adapter !== adapter) recycler.adapter = adapter
+            groupTitle.text = if (groupPos >= 0) groupLabel(groupPos) else ""
+            applyFilter()
+        }
+        backCallback.isEnabled = groupPos >= 0 || searching
+    }
+
+    private fun goHome() {
+        groupPos = -1
+        query = ""
+        searchBox.setText("")
+        render()
     }
 
     private fun applyFilter() {
         val q = query.trim().lowercase()
         val group = if (groupPos >= 2) groupNames.getOrNull(groupPos - 2) else null
         shown = all.filter { ch ->
-            val groupOk = when (groupPos) {
-                0 -> true
-                1 -> ch.url in favorites
+            val groupOk = when {
+                groupPos <= 0 -> true
+                groupPos == 1 -> ch.url in favorites
                 else -> ch.group == group
             }
             groupOk && (q.isEmpty() || ch.name.lowercase().contains(q))

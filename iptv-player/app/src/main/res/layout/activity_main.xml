@@ -46,11 +46,15 @@
         android:paddingStart="12dp"
         android:paddingEnd="12dp">
 
-        <Spinner
-            android:id="@+id/group_spinner"
+        <TextView
+            android:id="@+id/group_title"
             android:layout_width="0dp"
             android:layout_height="48dp"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:maxLines="1"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
 
         <TextView
             android:id="@+id/count"
