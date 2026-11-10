@@ -31,6 +31,7 @@ class DetailsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         AppTheme.load(this)
         History.init(this)
+        Ratings.init(this)
         val ch = Session.selected
         if (ch == null) {
             finish()
@@ -68,6 +69,7 @@ class DetailsActivity : AppCompatActivity() {
 
         title.text = ch.name
         showRating(rating, ch.rating.orEmpty())
+        if (ch.rating.isNullOrBlank()) Ratings.get(ch) { showRating(rating, it) }
         loadPoster(ch.logo)
 
         val isSeries = ch.url.startsWith(Playlist.SERIES_SCHEME)
@@ -144,7 +146,8 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun bind(d: Details) {
         findViewById<TextView>(R.id.d_title).text = d.title
-        showRating(findViewById(R.id.d_rating), d.rating.ifBlank { channel.rating.orEmpty() })
+        val shownRating = d.rating.ifBlank { channel.rating.orEmpty() }
+        if (shownRating.isNotBlank()) showRating(findViewById(R.id.d_rating), shownRating)
         if (!d.poster.isNullOrBlank() && d.poster != channel.logo) loadPoster(d.poster)
 
         val meta = listOf(d.release, d.genre, d.duration).filter { it.isNotBlank() }.joinToString("  ·  ")

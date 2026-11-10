@@ -96,6 +96,13 @@ class ChannelAdapter(
                 r.visibility = View.VISIBLE
             } else {
                 r.visibility = View.GONE
+                // The list had no rating: look it up (provider info, or TMDB if a key is set).
+                Ratings.get(ch) { v ->
+                    if (holder.boundUrl == ch.url) {
+                        r.text = "★ $v"
+                        r.visibility = View.VISIBLE
+                    }
+                }
             }
         }
 

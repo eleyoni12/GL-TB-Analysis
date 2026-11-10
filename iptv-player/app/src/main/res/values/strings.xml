@@ -77,4 +77,7 @@
     <string name="sort_newest">الأحدث أولًا</string>
     <string name="sort_server">ترتيب السيرفر</string>
     <string name="sort_az">أبجدي</string>
+    <string name="all_episodes">☰ كل الحلقات</string>
+    <string name="next_episode">الحلقة التالية ▶</string>
+    <string name="tmdb_key_label">مفتاح TMDB (اختياري) لجلب التقييمات لو السيرفر لا يوفرها</string>
 </resources>

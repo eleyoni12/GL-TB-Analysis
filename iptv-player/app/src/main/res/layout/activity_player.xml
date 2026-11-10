@@ -11,6 +11,7 @@
         android:layout_height="match_parent"
         app:resize_mode="fit"
         app:show_buffering="when_playing"
+        app:surface_type="texture_view"
         app:use_controller="true" />
 
     <LinearLayout
@@ -35,6 +36,34 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="#F2F4F8"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/ep_box"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="110dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btn_all_eps"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/all_episodes"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_next_ep"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/next_episode"
             android:textSize="13sp" />
     </LinearLayout>
 

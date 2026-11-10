@@ -77,4 +77,7 @@
     <string name="sort_newest">Newest first</string>
     <string name="sort_server">Server order</string>
     <string name="sort_az">A–Z</string>
+    <string name="all_episodes">☰ All episodes</string>
+    <string name="next_episode">Next episode ▶</string>
+    <string name="tmdb_key_label">TMDB API key (optional) to fetch ratings when the server has none</string>
 </resources>

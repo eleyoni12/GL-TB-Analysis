@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         History.init(this)
+        Ratings.init(this)
         prefs = getSharedPreferences("iptv", Context.MODE_PRIVATE)
         cacheFile = File(filesDir, "playlist.m3u")
         favorites.addAll(prefs.getStringSet("favs", emptySet()).orEmpty())
@@ -233,6 +234,7 @@ class MainActivity : AppCompatActivity() {
             result.onSuccess { (used, library) ->
                 prefs.edit().putString("source_url", used).apply()
                 Epg.source = used
+                Ratings.clearMisses()
                 setLibrary(library)
                 Toast.makeText(
                     this@MainActivity,

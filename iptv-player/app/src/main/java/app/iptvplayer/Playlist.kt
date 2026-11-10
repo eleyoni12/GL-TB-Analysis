@@ -92,6 +92,19 @@ object Playlist {
         }
     }
 
+    fun httpGetText(urlStr: String, timeoutMs: Int = 10_000): String {
+        val c = URL(urlStr).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = timeoutMs
+            c.readTimeout = timeoutMs
+            c.setRequestProperty("User-Agent", UA)
+            if (c.responseCode !in 200..299) throw IOException("HTTP ${c.responseCode}")
+            return c.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            c.disconnect()
+        }
+    }
+
     /** Returns (base, user, pass) when [urlStr] is an Xtream get.php link. */
     fun xtreamCreds(urlStr: String): Triple<String, String, String>? {
         if (!urlStr.contains("get.php")) return null

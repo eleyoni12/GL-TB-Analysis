@@ -1,9 +1,13 @@
 package app.iptvplayer
 
 import android.content.SharedPreferences
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.widget.RadioGroup
@@ -14,7 +18,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -23,9 +26,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.effect.Brightness
-import androidx.media3.effect.Contrast
-import androidx.media3.effect.HslAdjustment
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.BehindLiveWindowException
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -44,9 +44,19 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var pictureBtn: View
     private lateinit var infoBox: View
     private lateinit var epgView: TextView
+    private lateinit var epBox: View
+    private lateinit var nextBtn: View
+    private var controllerVisible = false
+    private var nearEnd = false
     private lateinit var prefs: SharedPreferences
     private val stage = HashMap<Int, Int>()
     private val handler = Handler(Looper.getMainLooper())
+    private val ticker = object : Runnable {
+        override fun run() {
+            checkNearEnd()
+            handler.postDelayed(this, 1_000)
+        }
+    }
     private val saver = object : Runnable {
         override fun run() {
             saveProgress()
@@ -67,6 +77,10 @@ class PlayerActivity : AppCompatActivity() {
         pictureBtn = findViewById(R.id.btn_picture)
         infoBox = findViewById(R.id.info_box)
         epgView = findViewById(R.id.epg)
+        epBox = findViewById(R.id.ep_box)
+        nextBtn = findViewById(R.id.btn_next_ep)
+        findViewById<View>(R.id.btn_all_eps).setOnClickListener { showAllEpisodes() }
+        nextBtn.setOnClickListener { player?.let { it.seekToNextMediaItem(); it.play() } }
         titleView.setTextColor(AppTheme.accent)
         (pictureBtn as? android.widget.Button)?.setTextColor(AppTheme.accent)
         pictureBtn.setOnClickListener { showPictureDialog() }
@@ -75,6 +89,8 @@ class PlayerActivity : AppCompatActivity() {
                 val v = if (visibility == View.VISIBLE) View.VISIBLE else View.GONE
                 infoBox.visibility = v
                 pictureBtn.visibility = v
+                controllerVisible = visibility == View.VISIBLE
+                refreshEpBox()
             }
         )
         hideSystemBars()
@@ -88,6 +104,7 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         handler.removeCallbacks(saver)
+        handler.removeCallbacks(ticker)
         saveProgress()
         player?.release()
         player = null
@@ -146,6 +163,8 @@ class PlayerActivity : AppCompatActivity() {
                 val p = player ?: return
                 Session.channels.getOrNull(p.currentMediaItemIndex)?.let { History.touch(it) }
                 loadEpg()
+                nearEnd = false
+                refreshEpBox()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -186,7 +205,50 @@ class PlayerActivity : AppCompatActivity() {
         exo.prepare()
         exo.playWhenReady = true
         handler.postDelayed(saver, 5_000)
+        handler.postDelayed(ticker, 1_000)
         loadEpg()
+        refreshEpBox()
+    }
+
+    // ------------------------------------------------------------ episodes
+
+    private fun isEpisodes(): Boolean {
+        val p = player ?: return false
+        return Session.channels.size > 1 && Session.channels.getOrNull(p.currentMediaItemIndex)?.kind == "series"
+    }
+
+    /** "All episodes" / "Next episode" buttons: with the controls, and automatically near the end. */
+    private fun refreshEpBox() {
+        val p = player
+        epBox.visibility = if (isEpisodes() && (controllerVisible || nearEnd)) View.VISIBLE else View.GONE
+        nextBtn.visibility = if (p != null && p.hasNextMediaItem()) View.VISIBLE else View.GONE
+    }
+
+    private fun checkNearEnd() {
+        val p = player ?: return
+        val near = isEpisodes() && p.hasNextMediaItem() && p.duration > 0 &&
+            p.duration - p.currentPosition in 0..30_000
+        if (near != nearEnd) {
+            nearEnd = near
+            refreshEpBox()
+        }
+    }
+
+    private fun showAllEpisodes() {
+        val p = player ?: return
+        val names = Session.channels.map { it.name }.toTypedArray()
+        val cur = p.currentMediaItemIndex
+        val dlg = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.all_episodes)
+            .setSingleChoiceItems(names, cur) { d, which ->
+                p.seekTo(which, 0L)
+                p.play()
+                d.dismiss()
+            }
+            .setOnDismissListener { hideSystemBars() }
+            .create()
+        dlg.setOnShowListener { dlg.listView.setSelection(cur) }
+        dlg.show()
     }
 
     // ----------------------------------------------------------------- EPG
@@ -210,16 +272,32 @@ class PlayerActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------- picture
 
+    /** Brightness / contrast / saturation through a color matrix on the video surface (works on every device). */
     private fun applyPicture() {
-        val p = player ?: return
         val b = prefs.getInt("pic_b", 0)
         val c = prefs.getInt("pic_c", 0)
         val s = prefs.getInt("pic_s", 0)
-        val fx = ArrayList<Effect>()
-        if (b != 0) fx.add(Brightness(b / 200f))
-        if (c != 0) fx.add(Contrast(c / 200f))
-        if (s != 0) fx.add(HslAdjustment.Builder().adjustSaturation(s.toFloat()).build())
-        p.setVideoEffects(fx)
+        val tv = playerView.videoSurfaceView as? TextureView
+        if (tv != null) {
+            if (b == 0 && c == 0 && s == 0) {
+                tv.setLayerType(View.LAYER_TYPE_NONE, null)
+            } else {
+                val cm = ColorMatrix().apply { setSaturation((1f + s / 100f).coerceAtLeast(0f)) }
+                val scale = (1f + c / 100f).coerceAtLeast(0f)
+                val translate = (1f - scale) * 127.5f + b * 0.6f
+                cm.postConcat(
+                    ColorMatrix(
+                        floatArrayOf(
+                            scale, 0f, 0f, 0f, translate,
+                            0f, scale, 0f, 0f, translate,
+                            0f, 0f, scale, 0f, translate,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                )
+                tv.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply { colorFilter = ColorMatrixColorFilter(cm) })
+            }
+        }
         playerView.resizeMode = when (prefs.getInt("pic_resize", 0)) {
             1 -> AspectRatioFrameLayout.RESIZE_MODE_FILL
             2 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -238,14 +316,16 @@ class PlayerActivity : AppCompatActivity() {
 
         fun bind(sb: SeekBar, key: String) {
             sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, value: Int, fromUser: Boolean) {}
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {
-                    prefs.edit().putInt(key, sb.progress - 100).apply()
+                override fun onProgressChanged(s: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    prefs.edit().putInt(key, value - 100).apply() // saved on every change (remote or touch)
                     applyPicture()
                 }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
+        for (sb in listOf(sbB, sbC, sbS)) sb.keyProgressIncrement = 5
         bind(sbB, "pic_b")
         bind(sbC, "pic_c")
         bind(sbS, "pic_s")
@@ -284,7 +364,10 @@ class PlayerActivity : AppCompatActivity() {
             .setTitle(R.string.picture_title)
             .setView(v)
             .setPositiveButton(android.R.string.ok, null)
-            .setOnDismissListener { hideSystemBars() }
+            .setOnDismissListener {
+                applyPicture()
+                hideSystemBars()
+            }
             .show()
     }
 

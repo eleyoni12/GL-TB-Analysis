@@ -126,6 +126,16 @@ object SettingsDialog {
         paintSort()
         root.addView(HorizontalScrollView(act).apply { addView(sortRow) })
 
+        // Optional TMDB key for ratings
+        root.addView(TextView(act).apply { setText(R.string.tmdb_key_label); setPadding(0, dp(12), 0, 0) })
+        val tmdbBox = EditText(act).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            maxLines = 1
+            hint = "TMDB API key"
+            setText(sortPrefs.getString("tmdb_key", ""))
+        }
+        root.addView(tmdbBox)
+
         // Language
         root.addView(TextView(act).apply { setText(R.string.language); setPadding(0, dp(12), 0, 0) })
         val langRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
@@ -144,6 +154,7 @@ object SettingsDialog {
             .setTitle(R.string.settings_title)
             .setView(ScrollView(act).apply { addView(root) })
             .setPositiveButton(R.string.done) { _, _ ->
+                sortPrefs.edit().putString("tmdb_key", tmdbBox.text.toString().trim()).apply()
                 AppTheme.save(act, bg, header, card, accent, text)
                 onApply()
             }
