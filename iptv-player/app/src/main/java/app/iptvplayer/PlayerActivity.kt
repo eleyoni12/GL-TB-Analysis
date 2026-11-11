@@ -178,8 +178,21 @@ class PlayerActivity : AppCompatActivity() {
                 // Retry ladder: 1) force HLS, 2) swap .ts <-> .m3u8, 3) show what the server returned.
                 val cur = p.currentMediaItem ?: return
                 val url = cur.localConfiguration?.uri?.toString().orEmpty()
-                val s = stage[i] ?: 0
-                stage[i] = s + 1
+                val raw = stage[i] ?: 0
+                stage[i] = raw + 1
+                // Movies/episodes: the server often needs a moment to prepare the stream, so the first
+                // failure is retried unchanged after a short wait (2s, then 4s) before trying other formats.
+                val vodFirst = url.contains("/movie/") || url.contains("/series/")
+                if (vodFirst && raw < 2) {
+                    handler.postDelayed({
+                        if (player === p) {
+                            p.prepare()
+                            p.play()
+                        }
+                    }, if (raw == 0) 2_000L else 4_000L)
+                    return
+                }
+                val s = if (vodFirst) raw - 2 else raw
                 val ext = url.substringAfterLast('.', "").substringBefore('?').lowercase()
                 val base = url.substringBeforeLast('.')
                 val vodLike = url.contains("/movie/") || url.contains("/series/")
