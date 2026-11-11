@@ -180,13 +180,19 @@ class PlayerActivity : AppCompatActivity() {
                 val url = cur.localConfiguration?.uri?.toString().orEmpty()
                 val s = stage[i] ?: 0
                 stage[i] = s + 1
+                val ext = url.substringAfterLast('.', "").substringBefore('?').lowercase()
+                val base = url.substringBeforeLast('.')
+                val vodLike = url.contains("/movie/") || url.contains("/series/")
+                fun swap(newExt: String) = cur.buildUpon().setUri("$base.$newExt").setMimeType(null).build()
                 val next: MediaItem? = when (s) {
                     0 -> cur.buildUpon().setMimeType(MimeTypes.APPLICATION_M3U8).build()
                     1 -> when {
-                        url.endsWith(".ts") -> cur.buildUpon().setUri(url.removeSuffix(".ts") + ".m3u8").setMimeType(null).build()
-                        url.endsWith(".m3u8") -> cur.buildUpon().setUri(url.removeSuffix(".m3u8") + ".ts").setMimeType(null).build()
+                        ext == "ts" -> swap("m3u8")
+                        ext == "m3u8" -> swap("ts")
+                        vodLike -> swap("m3u8")
                         else -> null
                     }
+                    2 -> if (vodLike && ext == "m3u8") swap("ts") else null
                     else -> null
                 }
                 if (next != null) {
@@ -373,23 +379,51 @@ class PlayerActivity : AppCompatActivity() {
 
     // ----------------------------------------------------------- diagnosis
 
-    /** Asks the server directly what it returns, to explain a playback failure. */
+    private fun probe(urlStr: String, limit: Int): Triple<Int, String, ByteArray> {
+        val c = URL(urlStr).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 10_000
+            c.readTimeout = 10_000
+            c.setRequestProperty("User-Agent", "VLC/3.0.18 LibVLC/3.0.18")
+            val code = c.responseCode
+            val type = c.contentType ?: "?"
+            val stream = if (code >= 400) c.errorStream else c.inputStream
+            val buf = ByteArray(limit)
+            var n = 0
+            stream?.use { st ->
+                while (n < limit) {
+                    val r = st.read(buf, n, limit - n)
+                    if (r <= 0) break
+                    n += r
+                }
+            }
+            return Triple(code, type, buf.copyOf(n))
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    private fun printable(b: ByteArray, max: Int): String =
+        if (b.isEmpty()) "(empty)"
+        else String(b, 0, minOf(b.size, max), Charsets.ISO_8859_1).map { if (it.code in 32..126) it else '.' }.joinToString("")
+
+    /** Asks the server directly what it returns (and what its first HLS segment is), to explain a failure. */
     private fun diagnose(url: String, error: PlaybackException) {
         Thread {
             val info = try {
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 10_000
-                c.readTimeout = 10_000
-                c.setRequestProperty("User-Agent", "VLC/3.0.18 LibVLC/3.0.18")
-                val code = c.responseCode
-                val type = c.contentType ?: "?"
-                val stream = if (code >= 400) c.errorStream else c.inputStream
-                val buf = ByteArray(200)
-                val n = stream?.use { it.read(buf) } ?: 0
-                c.disconnect()
-                val text = if (n > 0) String(buf, 0, n, Charsets.ISO_8859_1)
-                    .map { if (it.code in 32..126) it else '.' }.joinToString("") else "(empty)"
-                "HTTP $code\n$type\n$text"
+                val (code, type, body) = probe(url, 4096)
+                val sb = StringBuilder("HTTP $code\n$type\n${printable(body, 160)}")
+                val text = String(body, Charsets.ISO_8859_1)
+                if (text.startsWith("#EXTM3U")) {
+                    val seg = text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") }
+                    if (seg != null) {
+                        val segUrl = URL(URL(url), seg).toString()
+                        val (sc, st, sb2) = probe(segUrl, 1024)
+                        val sync = if (sb2.isNotEmpty() && sb2[0] == 0x47.toByte()) "TS sync OK" else "NOT MPEG-TS"
+                        sb.append("\n\n--- first segment ---\nHTTP $sc\n$st\n$sync\n${printable(sb2, 100)}")
+                    }
+                }
+                sb.toString()
             } catch (e: Exception) {
                 e.javaClass.simpleName + ": " + (e.message ?: "")
             }
@@ -399,10 +433,23 @@ class PlayerActivity : AppCompatActivity() {
                         .setTitle(error.errorCodeName)
                         .setMessage(info)
                         .setPositiveButton(android.R.string.ok, null)
+                        .setNeutralButton(R.string.open_external) { _, _ -> openExternal(url) }
                         .show()
                 }
             }
         }.start()
+    }
+
+    /** Fallback: hand the link to another installed player (VLC, MX Player, ...). */
+    private fun openExternal(url: String) {
+        try {
+            startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW)
+                    .setDataAndType(android.net.Uri.parse(url), "video/*")
+            )
+        } catch (_: Exception) {
+            android.widget.Toast.makeText(this, R.string.no_external_player, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun Channel.toMediaItem(): MediaItem =

@@ -80,4 +80,6 @@
     <string name="all_episodes">☰ كل الحلقات</string>
     <string name="next_episode">الحلقة التالية ▶</string>
     <string name="tmdb_key_label">مفتاح TMDB (اختياري) لجلب التقييمات لو السيرفر لا يوفرها</string>
+    <string name="open_external">فتح بمشغل خارجي</string>
+    <string name="no_external_player">لا يوجد مشغل خارجي مثبت (مثل VLC)</string>
 </resources>
