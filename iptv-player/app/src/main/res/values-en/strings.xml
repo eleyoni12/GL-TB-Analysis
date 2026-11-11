@@ -82,4 +82,5 @@
     <string name="tmdb_key_label">TMDB API key (optional) to fetch ratings when the server has none</string>
     <string name="open_external">Open in external player</string>
     <string name="no_external_player">No external player installed (e.g. VLC)</string>
+    <string name="reconnecting">Connection dropped, reconnecting…</string>
 </resources>

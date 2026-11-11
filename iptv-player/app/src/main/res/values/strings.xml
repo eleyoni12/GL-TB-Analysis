@@ -82,4 +82,5 @@
     <string name="tmdb_key_label">مفتاح TMDB (اختياري) لجلب التقييمات لو السيرفر لا يوفرها</string>
     <string name="open_external">فتح بمشغل خارجي</string>
     <string name="no_external_player">لا يوجد مشغل خارجي مثبت (مثل VLC)</string>
+    <string name="reconnecting">انقطع الاتصال، جارٍ إعادة الاتصال…</string>
 </resources>

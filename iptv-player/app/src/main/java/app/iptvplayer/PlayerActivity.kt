@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
@@ -26,6 +27,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.BehindLiveWindowException
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -48,12 +50,16 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var nextBtn: View
     private var controllerVisible = false
     private var nearEnd = false
+    private var lastRecoverAt = 0L
+    private var lastErrorAt = 0L
     private lateinit var prefs: SharedPreferences
     private val stage = HashMap<Int, Int>()
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
             checkNearEnd()
+            val p = player
+            if (p != null && p.isPlaying && SystemClock.elapsedRealtime() - lastErrorAt > 20_000) stage.clear()
             handler.postDelayed(this, 1_000)
         }
     }
@@ -151,6 +157,9 @@ class PlayerActivity : AppCompatActivity() {
             .setReadTimeoutMs(15_000)
 
         val exo = ExoPlayer.Builder(this)
+            .setLoadControl(
+                DefaultLoadControl.Builder().setBufferDurationsMs(20_000, 40_000, 2_000, 4_000).build()
+            )
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, http))
             )
@@ -178,6 +187,24 @@ class PlayerActivity : AppCompatActivity() {
                 // Retry ladder: 1) force HLS, 2) swap .ts <-> .m3u8, 3) show what the server returned.
                 val cur = p.currentMediaItem ?: return
                 val url = cur.localConfiguration?.uri?.toString().orEmpty()
+                val now = SystemClock.elapsedRealtime()
+                lastErrorAt = now
+                val pos = p.currentPosition
+                val isVod = url.contains("/movie/") || url.contains("/series/")
+                // The stream dropped while playing (e.g. the server expired the session): reconnect
+                // with a fresh session and carry on from the same position.
+                if (isVod && pos > 3_000 && now - lastRecoverAt > 10_000) {
+                    lastRecoverAt = now
+                    android.widget.Toast.makeText(this@PlayerActivity, R.string.reconnecting, android.widget.Toast.LENGTH_SHORT).show()
+                    handler.postDelayed({
+                        if (player === p) {
+                            p.seekTo(pos)
+                            p.prepare()
+                            p.play()
+                        }
+                    }, 800)
+                    return
+                }
                 val raw = stage[i] ?: 0
                 stage[i] = raw + 1
                 // Movies/episodes: the server often needs a moment to prepare the stream, so the first
@@ -209,7 +236,9 @@ class PlayerActivity : AppCompatActivity() {
                     else -> null
                 }
                 if (next != null) {
+                    val resumePos = p.currentPosition
                     p.replaceMediaItem(i, next)
+                    if (resumePos > 0) p.seekTo(i, resumePos)
                     p.prepare()
                     p.play()
                     return
